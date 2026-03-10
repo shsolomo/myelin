@@ -8,7 +8,10 @@
  */
 
 import Database from 'better-sqlite3';
+import { createRequire } from 'node:module';
 import { initSchema, extendSchemaForCode } from './schema.js';
+
+const require = createRequire(import.meta.url);
 
 // ── Enums ────────────────────────────────────────────────────────────────────
 
