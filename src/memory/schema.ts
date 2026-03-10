@@ -94,6 +94,7 @@ const CODE_COLUMNS: Array<[string, string]> = [
   ['ado_id', 'INTEGER'],
   ['state', 'TEXT'],
   ['iteration', 'TEXT'],
+  ['namespace', "TEXT DEFAULT 'personal'"],
 ];
 
 const CODE_INDEXES = [
@@ -101,6 +102,7 @@ const CODE_INDEXES = [
   'CREATE INDEX IF NOT EXISTS idx_nodes_category_type ON nodes(category, type)',
   'CREATE INDEX IF NOT EXISTS idx_nodes_file_path ON nodes(file_path)',
   'CREATE INDEX IF NOT EXISTS idx_nodes_ado_id ON nodes(ado_id)',
+  'CREATE INDEX IF NOT EXISTS idx_nodes_namespace ON nodes(namespace)',
 ];
 
 /** ALTER TABLE statements that add code-graph columns (idempotent). */

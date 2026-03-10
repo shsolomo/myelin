@@ -861,8 +861,9 @@ program
   .command('parse')
   .description('Index a repository into the knowledge graph using tree-sitter')
   .argument('<repo-path>', 'Path to the git repository root')
+  .option('--namespace <ns>', 'Namespace tag (default: repo directory name)')
   .option('--db <path>', 'Path to graph.db')
-  .action((repoPath: string, opts: { db?: string }) => {
+  .action((repoPath: string, opts: { db?: string; namespace?: string }) => {
     if (!existsSync(repoPath)) {
       console.error(chalk.red(`Repository path does not exist: ${repoPath}`));
       process.exit(1);
@@ -872,14 +873,16 @@ program
       join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), 'code', 'index.js')
     );
 
-    console.log(chalk.cyan(`Indexing ${repoPath}...`));
+    const { resolve, basename } = require('node:path');
+    const absRepoPath = resolve(repoPath);
+    const ns = opts.namespace || `repo:${basename(absRepoPath)}`;
+
+    console.log(chalk.cyan(`Indexing ${repoPath} (namespace: ${ns})...`));
     const files = walkRepo(repoPath);
     console.log(`Found ${files.length} files`);
 
     const parsedFiles: any[] = [];
     let parseErrors = 0;
-    const { resolve } = require('node:path');
-    const absRepoPath = resolve(repoPath);
     for (const { filePath, language } of files) {
       const parser = getParser(language);
       if (!parser) continue;
@@ -898,8 +901,63 @@ program
     console.log(`Parsed ${parsedFiles.length} files (${parseErrors} errors)`);
 
     const dbPath = opts.db || join(homedir(), '.copilot', '.working-memory', 'graph.db');
-    const result = writeToGraph(parsedFiles, dbPath);
+    const result = writeToGraph(parsedFiles, dbPath, ns);
     console.log(chalk.green(`✅ Indexed: ${result.nodes} nodes, ${result.edges} edges from ${result.files} files`));
+  });
+
+// ── Namespaces ───────────────────────────────────────────────────────────────
+
+program
+  .command('namespaces')
+  .description('List all namespaces with node counts')
+  .option('--db <path>', 'Path to graph.db')
+  .action((opts: { db?: string }) => {
+    const dbPath = opts.db || join(homedir(), '.copilot', '.working-memory', 'graph.db');
+    const graph = new KnowledgeGraph(dbPath);
+    try {
+      const rows = graph.db.prepare(
+        `SELECT COALESCE(namespace, 'personal') as ns, COUNT(*) as count
+         FROM nodes GROUP BY ns ORDER BY count DESC`
+      ).all() as Array<{ ns: string; count: number }>;
+
+      if (rows.length === 0) {
+        console.log('No namespaces found.');
+        return;
+      }
+
+      const table = new Table({ head: ['Namespace', 'Nodes'] });
+      for (const r of rows) {
+        table.push([r.ns, String(r.count)]);
+      }
+      console.log(table.toString());
+    } finally {
+      graph.close();
+    }
+  });
+
+// ── Visualization ────────────────────────────────────────────────────────────
+
+program
+  .command('viz')
+  .description('Visualize the knowledge graph in the browser')
+  .option('--category <cat>', 'Filter by category (knowledge, code)')
+  .option('--type <type>', 'Filter by node type')
+  .option('--min-salience <n>', 'Minimum salience', parseFloat)
+  .option('--focus <name>', 'Focus on a specific node and its neighborhood')
+  .option('--depth <n>', 'Neighborhood depth for focus mode', parseInt, 2)
+  .option('--port <n>', 'HTTP port', parseInt)
+  .option('--db <path>', 'Path to graph.db')
+  .action(async (opts) => {
+    const { startVizServer } = await import('./viz.js');
+    await startVizServer({
+      dbPath: opts.db,
+      category: opts.category,
+      type: opts.type,
+      minSalience: opts.minSalience,
+      focus: opts.focus,
+      depth: opts.depth,
+      port: opts.port,
+    });
   });
 
 // ── Setup Extension ──────────────────────────────────────────────────────────

@@ -113,12 +113,19 @@ function writeParsedFile(
 export function writeToGraph(
   parsedFiles: ParsedFile[],
   dbPath?: string,
+  namespace?: string,
 ): { nodes: number; edges: number; files: number } {
   const resolvedPath = dbPath ?? DEFAULT_DB_PATH;
   const db = new Database(resolvedPath);
   db.pragma('journal_mode = WAL');
   // FK OFF for code-graph: edges may reference external types/namespaces
   db.pragma('foreign_keys = OFF');
+
+  // Set namespace on nodes if column exists
+  const cols = new Set(
+    (db.pragma('table_info(nodes)') as Array<{ name: string }>).map(r => r.name),
+  );
+  const hasNamespace = cols.has('namespace');
 
   const totals = { nodes: 0, edges: 0, files: 0 };
 
@@ -131,6 +138,13 @@ export function writeToGraph(
         totals.files++;
       });
       txn();
+    }
+
+    // Tag all code nodes with namespace
+    if (hasNamespace && namespace) {
+      db.prepare(
+        `UPDATE nodes SET namespace = ? WHERE category = 'code' AND (namespace IS NULL OR namespace = 'personal')`,
+      ).run(namespace);
     }
   } finally {
     db.close();

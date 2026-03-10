@@ -51,10 +51,12 @@ export interface Node {
   createdAt: string;
   lastReinforced: string;
   tags: string[];
+  // Extended fields (added via ALTER TABLE)
   category?: string;
   filePath?: string;
   lineStart?: number;
   lineEnd?: number;
+  namespace?: string;
 }
 
 export interface Edge {
@@ -74,6 +76,8 @@ export interface FindNodesFilters {
   tag?: string;
   minSalience?: number;
   limit?: number;
+  namespace?: string;
+  category?: string;
 }
 
 export interface SubgraphFilters {
@@ -273,6 +277,8 @@ export class KnowledgeGraph {
       tag,
       minSalience = 0.0,
       limit = 50,
+      namespace,
+      category,
     } = filters;
 
     let query = 'SELECT DISTINCT n.* FROM nodes n';
@@ -293,6 +299,16 @@ export class KnowledgeGraph {
     if (sourceAgent) {
       conditions.push('n.source_agent = ?');
       params.push(sourceAgent);
+    }
+
+    if (namespace) {
+      conditions.push('n.namespace = ?');
+      params.push(namespace);
+    }
+
+    if (category) {
+      conditions.push('n.category = ?');
+      params.push(category);
     }
 
     query += ' WHERE ' + conditions.join(' AND ');
@@ -684,58 +700,46 @@ export class KnowledgeGraph {
     queryEmbedding: number[],
     limit = 20,
     category?: string,
+    namespace?: string,
   ): Array<{ node: Node; distance: number }> {
     if (!this.hasVecTable()) return [];
 
     try {
       const queryVec = new Float32Array(queryEmbedding).buffer;
 
-      let rows: Array<NodeRow & { distance: number }>;
+      // Build dynamic WHERE clause for optional filters
+      const extraConditions: string[] = [];
+      const extraParams: unknown[] = [];
 
-      if (category) {
-        // Check if category column exists
-        const cols = new Set(
-          (this.db.pragma('table_info(nodes)') as Array<{ name: string }>).map(
-            (r) => r.name,
-          ),
-        );
-        if (cols.has('category')) {
-          rows = this.db
-            .prepare(
-              `SELECT n.*, e.distance FROM nodes n
-               JOIN node_embeddings e ON n.id = e.node_id
-               WHERE e.embedding MATCH ? AND k = ? AND n.category = ?
-               ORDER BY e.distance`,
-            )
-            .all(
-              Buffer.from(queryVec),
-              limit,
-              category,
-            ) as Array<NodeRow & { distance: number }>;
-        } else {
-          rows = this.db
-            .prepare(
-              `SELECT n.*, e.distance FROM nodes n
-               JOIN node_embeddings e ON n.id = e.node_id
-               WHERE e.embedding MATCH ? AND k = ?
-               ORDER BY e.distance`,
-            )
-            .all(Buffer.from(queryVec), limit) as Array<
-            NodeRow & { distance: number }
-          >;
-        }
-      } else {
-        rows = this.db
-          .prepare(
-            `SELECT n.*, e.distance FROM nodes n
-             JOIN node_embeddings e ON n.id = e.node_id
-             WHERE e.embedding MATCH ? AND k = ?
-             ORDER BY e.distance`,
-          )
-          .all(Buffer.from(queryVec), limit) as Array<
-          NodeRow & { distance: number }
-        >;
+      const cols = new Set(
+        (this.db.pragma('table_info(nodes)') as Array<{ name: string }>).map(
+          (r) => r.name,
+        ),
+      );
+
+      if (category && cols.has('category')) {
+        extraConditions.push('n.category = ?');
+        extraParams.push(category);
       }
+      if (namespace && cols.has('namespace')) {
+        extraConditions.push('n.namespace = ?');
+        extraParams.push(namespace);
+      }
+
+      const whereExtra = extraConditions.length > 0
+        ? ' AND ' + extraConditions.join(' AND ')
+        : '';
+
+      const rows = this.db
+        .prepare(
+          `SELECT n.*, e.distance FROM nodes n
+           JOIN node_embeddings e ON n.id = e.node_id
+           WHERE e.embedding MATCH ? AND k = ?${whereExtra}
+           ORDER BY e.distance`,
+        )
+        .all(Buffer.from(queryVec), limit, ...extraParams) as Array<
+        NodeRow & { distance: number }
+      >;
 
       return rows.map((r) => ({ node: this.rowToNode(r), distance: r.distance }));
     } catch {
@@ -833,6 +837,7 @@ export class KnowledgeGraph {
       filePath: row.file_path ?? undefined,
       lineStart: row.line_start ?? undefined,
       lineEnd: row.line_end ?? undefined,
+      namespace: (row as any).namespace ?? undefined,
     };
   }
 
