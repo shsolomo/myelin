@@ -58,6 +58,13 @@ const session = await joinSession({
         } catch {}
       }
     },
+    onPostToolUse: async (input) => {
+      if (input.toolName === "task_complete") {
+        return {
+          additionalContext: "If you made any important decisions, discovered something unexpected, hit an error worth remembering, or noticed a pattern — log it with myelin_log before finishing. Skip routine or obvious outcomes.",
+        };
+      }
+    },
   },
   tools: [
     {
