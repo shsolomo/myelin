@@ -867,6 +867,76 @@ program
     process.exit(0);
   });
 
+// ── Setup Extension ──────────────────────────────────────────────────────────
+
+program
+  .command('setup-extension')
+  .description('Install Myelin as a Copilot CLI extension (in-process, no subprocess)')
+  .action(async () => {
+    const { execSync } = await import('node:child_process');
+    const { cpSync } = await import('node:fs');
+    const myPkg = join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '..');
+    const extTarget = join(homedir(), '.copilot', 'extensions', 'myelin');
+
+    // Step 1: Bundle the extension
+    console.log(chalk.cyan('Bundling extension...'));
+    try {
+      execSync('node scripts/bundle-extension.mjs', { cwd: myPkg, stdio: 'inherit' });
+    } catch {
+      console.error(chalk.red('Bundle failed. Make sure esbuild is installed: npm install'));
+      process.exit(1);
+    }
+
+    // Step 2: Create target directory
+    mkdirSync(extTarget, { recursive: true });
+
+    // Step 3: Copy bundled extension
+    const bundledPath = join(myPkg, 'dist', 'extension', 'extension.mjs');
+    if (!existsSync(bundledPath)) {
+      console.error(chalk.red('Bundled extension not found at ' + bundledPath));
+      process.exit(1);
+    }
+    writeFileSync(join(extTarget, 'extension.mjs'), readFileSync(bundledPath));
+
+    // Step 4: Create a package.json for native dependencies
+    const extPkg = {
+      name: 'myelin-extension',
+      private: true,
+      type: 'module',
+      dependencies: {
+        'better-sqlite3': '^11.0.0',
+        'sqlite-vec': '^0.1.6',
+        '@huggingface/transformers': '^3.0.0',
+        'onnxruntime-node': '^1.21.0',
+      },
+    };
+    writeFileSync(join(extTarget, 'package.json'), JSON.stringify(extPkg, null, 2));
+
+    // Step 5: Install native dependencies in the extension directory
+    console.log(chalk.cyan('Installing native dependencies...'));
+    try {
+      execSync('npm install --production --legacy-peer-deps', { cwd: extTarget, stdio: 'inherit' });
+    } catch {
+      console.error(chalk.yellow('Warning: Some native deps may have failed. Extension will work with reduced features.'));
+    }
+
+    console.log('');
+    console.log(chalk.green('✅ Myelin extension installed at: ') + extTarget);
+    console.log(chalk.gray('   Restart Copilot CLI or run /clear to load the extension.'));
+    console.log('');
+    console.log(chalk.cyan('Tools available after reload:'));
+    console.log('   myelin_query   — semantic graph search');
+    console.log('   myelin_boot    — agent context from graph');
+    console.log('   myelin_log     — structured event logging');
+    console.log('   myelin_show    — node detail + edges');
+    console.log('   myelin_stats   — graph statistics');
+    console.log('');
+    console.log(chalk.cyan('Auto hooks:'));
+    console.log('   onSessionStart          — graph context injected automatically');
+    console.log('   onUserPromptSubmitted   — relevant context on every message');
+    console.log('   onSessionEnd            — session summary auto-logged');
+  });
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
