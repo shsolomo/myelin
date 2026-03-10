@@ -789,7 +789,7 @@ function openBrowser(url: string): void {
 }
 
 export async function startVizServer(options: VizOptions): Promise<void> {
-  const dbPath = options.dbPath || options.db;
+  const dbPath = options.dbPath || options.db || (await import('node:path')).join((await import('node:os')).homedir(), '.copilot', '.working-memory', 'graph.db');
   const graph = new KnowledgeGraph(dbPath);
 
   // Ensure code-graph columns exist
