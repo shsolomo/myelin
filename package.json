@@ -8,6 +8,20 @@
   "bin": {
     "myelin": "dist/cli.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shsolomo/myelin.git"
+  },
+  "homepage": "https://github.com/shsolomo/myelin",
+  "bugs": {
+    "url": "https://github.com/shsolomo/myelin/issues"
+  },
+  "files": [
+    "dist/",
+    "src/extension/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
