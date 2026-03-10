@@ -1,0 +1,61 @@
+{
+  "name": "myelin",
+  "version": "0.1.0",
+  "description": "Knowledge graph memory system for AI agents. Semantic search, NER extraction, brain-inspired consolidation.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "myelin": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/",
+    "clean": "rimraf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "knowledge-graph",
+    "ai-agents",
+    "memory",
+    "semantic-search",
+    "ner",
+    "consolidation",
+    "copilot",
+    "extension"
+  ],
+  "author": "Shane Solomon",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "chalk": "^5.4.0",
+    "cli-table3": "^0.6.5",
+    "commander": "^13.0.0",
+    "tree-sitter": "^0.25.0",
+    "tree-sitter-bicep": "^1.1.0",
+    "tree-sitter-c-sharp": "^0.23.1",
+    "tree-sitter-go": "^0.25.0",
+    "tree-sitter-json": "^0.24.8",
+    "tree-sitter-powershell": "^0.26.3",
+    "tree-sitter-python": "^0.25.0",
+    "tree-sitter-typescript": "^0.23.2"
+  },
+  "optionalDependencies": {
+    "@huggingface/transformers": "^3.0.0",
+    "onnxruntime-node": "^1.21.0",
+    "sqlite-vec": "^0.1.7"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "rimraf": "^6.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
