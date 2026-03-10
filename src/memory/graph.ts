@@ -8,10 +8,7 @@
  */
 
 import Database from 'better-sqlite3';
-import { createRequire } from 'node:module';
 import { initSchema, extendSchemaForCode } from './schema.js';
-
-const require = createRequire(import.meta.url);
 
 // ── Enums ────────────────────────────────────────────────────────────────────
 
@@ -180,10 +177,23 @@ export class KnowledgeGraph {
 
   private initVecExtension(): void {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const sqliteVec = require('sqlite-vec') as {
-        load: (db: Database.Database) => void;
-      };
+      // Dynamic require for native addon — works in both ESM bundle and standalone
+      let sqliteVec: { load: (db: Database.Database) => void } | undefined;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        sqliteVec = globalThis.require?.('sqlite-vec');
+      } catch {
+        // Try createRequire fallback for ESM
+        try {
+          const mod = globalThis.require?.('node:module');
+          if (mod?.createRequire) {
+            const req = mod.createRequire(import.meta.url);
+            sqliteVec = req('sqlite-vec');
+          }
+        } catch { /* not available */ }
+      }
+      if (!sqliteVec) return;
+
       sqliteVec.load(this.db);
       this.db.exec(`
         CREATE VIRTUAL TABLE IF NOT EXISTS node_embeddings

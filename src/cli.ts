@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 
+// Provide require() for ESM — needed by native addons (sqlite-vec, better-sqlite3)
+import { createRequire } from 'node:module';
+if (!globalThis.require) { globalThis.require = createRequire(import.meta.url); }
+
 // Suppress model loading progress bars
 process.env.TRANSFORMERS_NO_ADVISORY_WARNINGS = '1';
 process.env.HF_HUB_DISABLE_PROGRESS_BARS = '1';

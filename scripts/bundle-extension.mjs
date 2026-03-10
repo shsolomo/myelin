@@ -3,7 +3,9 @@
  *
  * Usage: node scripts/bundle-extension.mjs
  *
- * Outputs to dist/extension/extension.mjs with native modules marked external.
+ * Native modules (better-sqlite3, sqlite-vec, etc.) are converted from
+ * static imports to require() calls so they resolve from the extension's
+ * node_modules directory, not the Copilot CLI process cwd.
  */
 
 import { build } from "esbuild";
@@ -13,24 +15,45 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
 
+// Packages that need require() instead of import (native addons + Copilot SDK)
+const requirePackages = [
+  "better-sqlite3",
+  "sqlite-vec",
+  "onnxruntime-node",
+  "@huggingface/transformers",
+  "@github/copilot-sdk",
+  "@github/copilot-sdk/extension",
+];
+
+// Plugin: rewrite external imports to require() calls
+const requireExternals = {
+  name: "require-externals",
+  setup(build) {
+    for (const pkg of requirePackages) {
+      const filter = new RegExp(`^${pkg.replace("/", "\\/")}(\\/.*)?$`);
+      build.onResolve({ filter }, (args) => ({
+        path: args.path,
+        namespace: "require-external",
+      }));
+    }
+    build.onLoad({ filter: /.*/, namespace: "require-external" }, (args) => ({
+      contents: `module.exports = globalThis.require("${args.path}");`,
+      loader: "js",
+    }));
+  },
+};
+
 await build({
   entryPoints: [join(root, "src/extension/extension.ts")],
   bundle: true,
   platform: "node",
   format: "esm",
   outfile: join(root, "dist/extension/extension.mjs"),
-  external: [
-    "better-sqlite3",
-    "sqlite-vec",
-    "onnxruntime-node",
-    "@huggingface/transformers",
-    "@github/copilot-sdk",
-    "@github/copilot-sdk/extension",
-  ],
+  plugins: [requireExternals],
   banner: {
     js: `
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
+import { createRequire as __createRequire } from "node:module";
+if (!globalThis.require) { globalThis.require = __createRequire(import.meta.url); }
 `.trim(),
   },
   target: "node20",
