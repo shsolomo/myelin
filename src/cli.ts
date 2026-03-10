@@ -855,20 +855,51 @@ agent
     process.exit(0);
   });
 
-// ── Code command (placeholder) ───────────────────────────────────────────────
+// ── Code command ─────────────────────────────────────────────────────────────
 
 program
   .command('parse')
-  .description('Index a repository into the knowledge graph')
+  .description('Index a repository into the knowledge graph using tree-sitter')
   .argument('<repo-path>', 'Path to the git repository root')
   .option('--db <path>', 'Path to graph.db')
-  .action((repoPath: string, _opts) => {
+  .action((repoPath: string, opts: { db?: string }) => {
     if (!existsSync(repoPath)) {
       console.error(chalk.red(`Repository path does not exist: ${repoPath}`));
       process.exit(1);
     }
-    console.log(chalk.yellow('Code parsing not yet ported'));
-    process.exit(0);
+
+    const { walkRepo, getParser, writeToGraph } = require(
+      join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), 'code', 'index.js')
+    );
+
+    console.log(chalk.cyan(`Indexing ${repoPath}...`));
+    const files = walkRepo(repoPath);
+    console.log(`Found ${files.length} files`);
+
+    const parsedFiles: any[] = [];
+    let parseErrors = 0;
+    const { resolve } = require('node:path');
+    const absRepoPath = resolve(repoPath);
+    for (const { filePath, language } of files) {
+      const parser = getParser(language);
+      if (!parser) continue;
+      try {
+        const absFilePath = join(absRepoPath, filePath);
+        const source = readFileSync(absFilePath);
+        const parsed = parser.parseFile(absFilePath, source, filePath);
+        if (parsed.entities.length > 0) {
+          parsedFiles.push(parsed);
+        }
+      } catch {
+        parseErrors++;
+      }
+    }
+
+    console.log(`Parsed ${parsedFiles.length} files (${parseErrors} errors)`);
+
+    const dbPath = opts.db || join(homedir(), '.copilot', '.working-memory', 'graph.db');
+    const result = writeToGraph(parsedFiles, dbPath);
+    console.log(chalk.green(`✅ Indexed: ${result.nodes} nodes, ${result.edges} edges from ${result.files} files`));
   });
 
 // ── Setup Extension ──────────────────────────────────────────────────────────
