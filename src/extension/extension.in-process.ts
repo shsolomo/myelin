@@ -1,11 +1,12 @@
 /**
- * Myelin — Copilot CLI Extension (in-process)
+ * Myelin — Copilot CLI Extension
  *
  * This is the SOURCE file that gets bundled by esbuild into a single extension.mjs.
  * It imports myelin's graph library directly — no subprocess spawning.
  *
  * Tools: myelin_query, myelin_boot, myelin_log, myelin_show, myelin_stats
- * Hooks: onSessionStart (auto-boot), onSessionEnd (auto-log), onUserPromptSubmitted (context injection)
+ * Hooks: onSessionStart (auto-boot), onSessionEnd (auto-log),
+ *        onUserPromptSubmitted (context injection), onErrorOccurred (resilience)
  */
 
 import { homedir } from "node:os";
@@ -19,6 +20,7 @@ import { readLogEntries } from "../memory/structured-log.js";
 import { getEmbedding } from "../memory/embeddings.js";
 
 const DB_PATH = join(homedir(), ".copilot", ".working-memory", "graph.db");
+const MYELIN_VERSION = "0.3.1";
 
 /** Get a graph instance, or null if db doesn't exist. */
 function getGraph(): KnowledgeGraph | null {
@@ -30,23 +32,27 @@ const session = await joinSession({
   onPermissionRequest: approveAll,
 
   hooks: {
-    onSessionStart: async (_input: any) => {
-      // Auto-inject graph context for the default agent
+    onSessionStart: async (_input: any, _invocation: any) => {
       try {
-        if (!existsSync(DB_PATH)) return;
+        await session.log(`Myelin v${MYELIN_VERSION} loaded — 5 tools, 4 hooks`);
+
+        if (!existsSync(DB_PATH)) {
+          await session.log("No graph database found. Run `myelin init` to create one.", { level: "warning" });
+          return;
+        }
+
         const context = getBootContext("donna", { dbPath: DB_PATH });
         if (context && !context.includes("No graph nodes found")) {
           return {
             additionalContext: `## Graph Knowledge (auto-loaded by Myelin)\n\n${context}`,
           };
         }
-      } catch {
-        // Silent — graph may not exist or be empty
+      } catch (e: any) {
+        await session.log(`Myelin boot error: ${e.message}`, { level: "error" });
       }
     },
 
-    onUserPromptSubmitted: async (input: any) => {
-      // Semantic search for relevant context on every message
+    onUserPromptSubmitted: async (input: any, _invocation: any) => {
       try {
         const graph = getGraph();
         if (!graph) return;
@@ -58,7 +64,6 @@ const session = await joinSession({
           const results = graph.semanticSearch(queryEmbedding, 5, "knowledge");
           if (results.length === 0) return;
 
-          // Only inject if we found something reasonably relevant (distance < 1.2)
           const relevant = results.filter((r: any) => r.distance < 1.2);
           if (relevant.length === 0) return;
 
@@ -77,8 +82,7 @@ const session = await joinSession({
       }
     },
 
-    onSessionEnd: async (input: any) => {
-      // Auto-log session summary
+    onSessionEnd: async (input: any, _invocation: any) => {
       if (input.finalMessage) {
         try {
           appendStructuredLog("donna", "handover", input.finalMessage.slice(0, 200), {
@@ -87,6 +91,12 @@ const session = await joinSession({
         } catch {
           // Silent
         }
+      }
+    },
+
+    onErrorOccurred: async (input: any, _invocation: any) => {
+      if (input.recoverable && input.errorContext === "model_call") {
+        return { errorHandling: "retry" as const, retryCount: 2 };
       }
     },
   },
@@ -130,6 +140,9 @@ const session = await joinSession({
             `${n.type} | ${n.name} (${n.salience.toFixed(2)}) — ${n.description?.slice(0, 100)}`
           );
           return `FTS5 search: '${args.query}'\n${lines.join("\n")}`;
+        } catch (e: any) {
+          await session.log(`myelin_query error: ${e.message}`, { level: "error" });
+          return `Error: ${e.message}`;
         } finally {
           graph.close();
         }

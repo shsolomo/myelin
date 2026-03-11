@@ -111,6 +111,28 @@ myelin setup-extension    # Install Copilot CLI extension
 
 See [INSTALL.md](INSTALL.md) for detailed setup instructions.
 
+## Copilot CLI Extension
+
+This is myelin's primary integration point. After `myelin setup-extension`, every Copilot CLI agent gets:
+
+**Tools:**
+
+| Tool | What it does |
+|------|-------------|
+| `myelin_query` | Semantic + keyword search over the knowledge graph |
+| `myelin_boot` | Load agent-specific context at session start |
+| `myelin_log` | Log structured events (decision, finding, error, etc.) |
+| `myelin_show` | Inspect a node and its connections |
+| `myelin_stats` | Graph statistics and embedding coverage |
+
+**Lifecycle hooks:**
+- `onSessionStart` — graph context auto-injected before first message
+- `onUserPromptSubmitted` — relevant context added per message via semantic search
+- `onSessionEnd` — session summary auto-logged
+- `onErrorOccurred` — automatic retry on recoverable model errors
+
+The extension uses `@github/copilot-sdk` and is bundled into a single `extension.mjs` file via esbuild.
+
 ## Quick Start
 
 ```bash
@@ -137,9 +159,6 @@ myelin show "authentication"
 
 # Visualize in browser
 myelin viz
-
-# Boot an agent with graph context
-myelin agent boot myagent
 ```
 
 ## CLI Reference
@@ -151,6 +170,16 @@ myelin agent boot myagent
 | `myelin ingest <path>` | Ingest text documents (NER + embedding RE) |
 | `myelin ingest <path> --fast` | Ingest with proximity-only edges (no embeddings) |
 | `myelin vault <path>` | Index IDEA vault structure |
+| `myelin query <text>` | Semantic + keyword search |
+| `myelin show <name>` | Show node and connections |
+| `myelin stats` | Graph statistics |
+| `myelin nodes` | List nodes with filters |
+| `myelin embed` | Generate/update embeddings |
+| `myelin consolidate` | Run NREM/REM consolidation |
+| `myelin agent boot <name>` | Load agent context from graph |
+| `myelin agent log <name> <type> <summary>` | Log structured event |
+| `myelin viz` | D3.js graph visualization |
+| `myelin setup-extension` | Install Copilot CLI extension |
 
 ## Development
 
@@ -164,27 +193,6 @@ npm run test:watch    # Watch mode
 Tests are **required** for all code changes. The CI pipeline runs tests on every push and PR across Node 20/22 on Linux, Windows, and macOS. Code that ships without tests (unless impractical — e.g., CLI glue, visualization servers) will fail review.
 
 Test files live in `tests/` mirroring the `src/` structure. Use Vitest with in-memory SQLite for graph tests and mocked NER/embeddings for extraction tests.
-| `myelin query <text>` | Semantic + keyword search |
-| `myelin show <name>` | Show node and connections |
-| `myelin stats` | Graph statistics |
-| `myelin nodes` | List nodes with filters |
-| `myelin embed` | Generate/update embeddings |
-| `myelin consolidate` | Run NREM/REM consolidation |
-| `myelin agent boot <name>` | Load agent context from graph |
-| `myelin agent log <name> <type> <summary>` | Log structured event |
-| `myelin viz` | D3.js graph visualization |
-| `myelin setup-extension` | Install Copilot CLI extension |
-
-## As a Copilot CLI Extension
-
-After running `myelin setup-extension`, every Copilot agent gets native access to:
-
-**Tools:** `myelin_query`, `myelin_boot`, `myelin_log`, `myelin_show`, `myelin_stats`
-
-**Lifecycle hooks:**
-- `onSessionStart` — graph context auto-injected
-- `onUserPromptSubmitted` — relevant context added per message
-- `onSessionEnd` — session summary auto-logged
 
 ## Local Models
 
