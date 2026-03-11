@@ -44,7 +44,7 @@ const requireExternals = {
 };
 
 await build({
-  entryPoints: [join(root, "src/extension/extension.ts")],
+  entryPoints: [join(root, "src/extension/extension.in-process.ts")],
   bundle: true,
   platform: "node",
   format: "esm",
