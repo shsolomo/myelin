@@ -232,6 +232,7 @@ export class KnowledgeGraph {
       filePath: node.filePath,
       lineStart: node.lineStart,
       lineEnd: node.lineEnd,
+      namespace: node.namespace,
     };
 
     this.db
@@ -251,6 +252,22 @@ export class KnowledgeGraph {
         full.createdAt,
         full.lastReinforced,
       );
+
+    // Set extended columns if they exist (added via ALTER TABLE)
+    if (full.category || full.namespace) {
+      try {
+        const sets: string[] = [];
+        const vals: unknown[] = [];
+        if (full.category) { sets.push('category = ?'); vals.push(full.category); }
+        if (full.namespace) { sets.push('namespace = ?'); vals.push(full.namespace); }
+        if (sets.length > 0) {
+          vals.push(full.id);
+          this.db.prepare(`UPDATE nodes SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+        }
+      } catch {
+        // Extended columns may not exist yet
+      }
+    }
 
     const tagStmt = this.db.prepare(
       'INSERT OR IGNORE INTO node_tags (node_id, tag) VALUES (?, ?)',

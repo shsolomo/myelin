@@ -746,6 +746,7 @@ export function loadExtractionToGraph(
   graph: KnowledgeGraph,
   result: ExtractionResult,
   merge = true,
+  namespace?: string,
 ): ExtractionStats {
   const stats: ExtractionStats = {
     nodesAdded: 0,
@@ -765,6 +766,11 @@ export function loadExtractionToGraph(
       }
       stats.nodesReinforced++;
     } else if (!existing) {
+      // Set namespace on new nodes if provided
+      if (namespace) {
+        node.namespace = namespace;
+        node.category = 'knowledge';
+      }
       graph.addNode(node);
       stats.nodesAdded++;
     }

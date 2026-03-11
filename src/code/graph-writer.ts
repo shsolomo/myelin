@@ -143,7 +143,7 @@ export function writeToGraph(
     // Tag all code nodes with namespace
     if (hasNamespace && namespace) {
       db.prepare(
-        `UPDATE nodes SET namespace = ? WHERE category = 'code' AND (namespace IS NULL OR namespace = 'personal')`,
+        `UPDATE nodes SET namespace = ? WHERE category = 'code' AND (namespace IS NULL OR namespace = 'personal' OR namespace = 'unclassified')`,
       ).run(namespace);
     }
   } finally {

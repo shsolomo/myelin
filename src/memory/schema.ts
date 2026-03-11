@@ -94,7 +94,7 @@ const CODE_COLUMNS: Array<[string, string]> = [
   ['ado_id', 'INTEGER'],
   ['state', 'TEXT'],
   ['iteration', 'TEXT'],
-  ['namespace', "TEXT DEFAULT 'personal'"],
+  ['namespace', "TEXT DEFAULT 'unclassified'"],
 ];
 
 const CODE_INDEXES = [

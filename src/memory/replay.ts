@@ -109,13 +109,15 @@ export async function nremReplay(
   }
 
   // Phase 2 & 3: EXTRACT + SCORE
+  const namespace = `agent-${agentName}`;
+
   if (options.llmExtractions) {
     for (const jsonText of options.llmExtractions) {
       const extraction = parseLlmExtraction(jsonText, agentName);
       result.entitiesExtracted += extraction.entities.length;
       result.relationshipsExtracted += extraction.relationships.length;
 
-      const stats = loadExtractionToGraph(graph, extraction);
+      const stats = loadExtractionToGraph(graph, extraction, true, namespace);
       result.nodesAdded += stats.nodesAdded;
       result.nodesReinforced += stats.nodesReinforced;
       result.edgesAdded += stats.edgesAdded;
@@ -126,7 +128,7 @@ export async function nremReplay(
       result.entitiesExtracted += extraction.entities.length;
       result.relationshipsExtracted += extraction.relationships.length;
 
-      const stats = loadExtractionToGraph(graph, extraction);
+      const stats = loadExtractionToGraph(graph, extraction, true, namespace);
       result.nodesAdded += stats.nodesAdded;
       result.nodesReinforced += stats.nodesReinforced;
       result.edgesAdded += stats.edgesAdded;
