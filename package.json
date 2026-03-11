@@ -19,6 +19,7 @@
   "files": [
     "dist/",
     "scripts/",
+    "skills/",
     "INSTALL.md",
     "README.md",
     "LICENSE"

@@ -6,15 +6,16 @@ Myelin is a knowledge graph memory system for AI agents. It provides semantic se
 
 - Node.js >= 20
 - npm
+- C++ toolchain for native addons (Visual Studio Build Tools on Windows, Xcode on macOS, build-essential on Linux)
 - Copilot CLI with extensions enabled (experimental feature)
 
 ## Step 1: Install Myelin globally
 
 ```bash
-npm install -g myelin
+npm install -g github:shsolomo/myelin
 ```
 
-This installs the `myelin` CLI and all dependencies including semantic search models.
+This installs the `myelin` CLI and compiles native dependencies (better-sqlite3, sqlite-vec, tree-sitter).
 
 ## Step 2: Initialize the knowledge graph
 
@@ -24,7 +25,26 @@ myelin init
 
 This creates the graph database at `~/.copilot/.working-memory/graph.db`.
 
-## Step 3: Install the Copilot CLI extension
+## Step 3: Install the setup skill
+
+Copy the `myelin-setup` skill into your Copilot skills directory so your agent knows how to help you index code, notes, and set up agent memory:
+
+```bash
+# For global skills (available in all repos)
+cp -r /path/to/myelin/skills/myelin-setup ~/.copilot/skills/myelin-setup
+
+# Or for a specific repo
+cp -r /path/to/myelin/skills/myelin-setup .github/skills/myelin-setup
+```
+
+On Windows:
+```powershell
+Copy-Item -Recurse (Join-Path (npm root -g) myelin skills myelin-setup) "$env:USERPROFILE\.copilot\skills\myelin-setup"
+```
+
+Once installed, ask your agent to "set up myelin" or "index my code" — the skill guides the full setup interactively.
+
+## Step 4: Install the Copilot CLI extension
 
 ```bash
 myelin setup-extension
@@ -32,7 +52,7 @@ myelin setup-extension
 
 This bundles Myelin into a single extension file and installs it at `~/.copilot/extensions/myelin/` with all native dependencies. The extension runs in-process with the Copilot agent — no subprocess spawning.
 
-## Step 4: Reload Copilot CLI
+## Step 5: Reload Copilot CLI
 
 Restart Copilot CLI or run `/clear` in an active session to load the extension.
 
@@ -50,28 +70,33 @@ Restart Copilot CLI or run `/clear` in an active session to load the extension.
 - `onUserPromptSubmitted` — relevant context silently added on every message
 - `onSessionEnd` — session summary auto-logged
 
-## Optional: Index a codebase
+### Copilot Skill
+- `myelin-setup` — interactive guide for indexing code repos, notes, and agent memory
+
+## Quick Start
+
+After installation, index your first content:
 
 ```bash
-myelin parse ./path/to/repo
-```
+# Index a codebase (C#, TypeScript, Python, Go, JSON, YAML, Dockerfile, Bicep, PowerShell)
+myelin code parse ./path/to/repo
 
-This uses tree-sitter to parse source code (C#, TypeScript, Python, Go, JSON, YAML, Dockerfile) into the knowledge graph. Code nodes connect to knowledge nodes via cross-domain edges.
+# Start logging agent observations
+myelin agent log myagent decision "Use event-driven architecture" --tag architecture
 
-## Optional: Embed nodes for semantic search
+# Consolidate logs into the knowledge graph
+myelin consolidate --agent myagent
 
-```bash
+# Generate embeddings for semantic search
 myelin embed --category knowledge
-```
 
-This generates sentence embeddings for all knowledge nodes. The embedding model downloads on first run (~80MB) and is cached locally at `~/.cache/huggingface/`.
-
-## Verify
-
-After reloading Copilot CLI, ask the agent: "What myelin tools do you have?" It should list all 5 tools.
-
-Or from the CLI:
-```bash
+# Verify
 myelin stats
-myelin query "test query"
+myelin query "your search term"
+myelin agent boot myagent
+
+# Visualize the graph
+myelin viz
 ```
+
+Or just ask your agent: **"set up myelin for this project"** — the skill handles it.
