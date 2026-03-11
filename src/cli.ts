@@ -936,6 +936,46 @@ program
     }
   });
 
+// ── Vault Indexing ───────────────────────────────────────────────────────────
+
+program
+  .command('vault')
+  .argument('<path>', 'Path to IDEA vault directory')
+  .description('Index an IDEA vault (Initiatives, Domains, Expertise, Archive) into the knowledge graph')
+  .option('--namespace <ns>', 'Namespace for vault nodes', 'vault')
+  .option('--agent <name>', 'Source agent name', 'vault-parser')
+  .option('--db <path>', 'Path to graph.db')
+  .action(async (vaultPath: string, opts: { namespace: string; agent: string; db?: string }) => {
+    const { indexVault } = await import('./memory/vault-parser.js');
+    const { resolve } = await import('node:path');
+
+    const resolvedPath = resolve(vaultPath);
+    const dbPath = opts.db ?? join(homedir(), '.copilot', '.working-memory', 'graph.db');
+
+    if (!existsSync(resolvedPath)) {
+      console.error(`Vault path not found: ${resolvedPath}`);
+      process.exit(1);
+    }
+
+    console.log(`Indexing vault: ${resolvedPath}`);
+    const graph = new KnowledgeGraph(dbPath);
+    const result = indexVault(graph, resolvedPath, {
+      namespace: opts.namespace,
+      sourceAgent: opts.agent,
+    });
+
+    console.log('\nVault Indexing Results');
+    console.log('─'.repeat(40));
+    console.log(`Files processed: ${result.filesProcessed}`);
+    console.log(`Nodes added:     ${result.nodesAdded}`);
+    console.log(`Nodes reinforced: ${result.nodesReinforced}`);
+    console.log(`Edges added:     ${result.edgesAdded}`);
+    console.log(`Edges skipped:   ${result.edgesSkipped}`);
+    console.log(`\nPeople:      ${result.peopleFound.join(', ')}`);
+    console.log(`Domains:     ${result.domainsFound.join(', ')}`);
+    console.log(`Initiatives: ${result.initiativesFound.join(', ')}`);
+  });
+
 // ── Visualization ────────────────────────────────────────────────────────────
 
 program

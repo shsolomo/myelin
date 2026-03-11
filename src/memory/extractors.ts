@@ -21,7 +21,7 @@ import {
 import type { LogEntry } from "./log-parser.js";
 import { makeEntry } from "./log-parser.js";
 import { scoreEntry } from "./salience.js";
-import { ENTITY_PATTERNS } from "./vocabulary.js";
+import { ENTITY_PATTERNS, RELATIONSHIP_PATTERNS } from "./vocabulary.js";
 import * as ner from "./ner.js";
 
 // ---------------------------------------------------------------------------
@@ -294,7 +294,39 @@ function isValidPersonEntity(text: string): boolean {
   return true;
 }
 
-// Max character distance between two NER entities for a co-occurrence edge.
+/** Reject generic/garbage entities that NER sometimes extracts. */
+function isValidEntity(name: string, nodeType: NodeType): boolean {
+  const lower = name.toLowerCase().trim();
+
+  // Reject very short names (≤ 2 chars)
+  if (lower.length <= 2) return false;
+
+  // Reject if it's a generic node type word itself
+  const GENERIC_WORDS = new Set([
+    'person', 'people', 'bug', 'bugs', 'bugfix', 'tool', 'tools',
+    'pattern', 'patterns', 'decision', 'decisions', 'rule', 'rules',
+    'meeting', 'meetings', 'initiative', 'concept', 'convention',
+    'open', 'closed', 'fixed', 'done', 'pending', 'blocked',
+    'error', 'warning', 'issue', 'issues', 'feature', 'features',
+    'code', 'data', 'file', 'files', 'config', 'setup', 'update',
+    'system', 'module', 'service', 'api', 'cli', 'ui',
+    'test', 'tests', 'build', 'deploy', 'run', 'start', 'stop',
+    'true', 'false', 'null', 'undefined', 'none',
+    'yes', 'no', 'ok', 'the', 'this', 'that',
+    'real tools', 'reparse',
+  ]);
+  if (GENERIC_WORDS.has(lower)) return false;
+
+  // Reject bare file extensions
+  if (/^\.[a-z]+$/.test(lower) || /^[a-z]{1,4}$/.test(lower) && ['ts', 'js', 'py', 'go', 'md', 'cs', 'sh'].includes(lower)) return false;
+
+  // Reject if contains special chars (except spaces and hyphens)
+  if (/[\/+&@#$%^*(){}[\]<>|\\]/.test(name)) return false;
+
+  return true;
+}
+
+/** Max character distance between two NER entities for a co-occurrence edge. */
 // Uses both an absolute cap and a relative cap (40% of entry length) so that
 // short entries don't degenerate into "everything connects".
 const CO_OCCURRENCE_PROXIMITY = 300;
@@ -323,6 +355,9 @@ async function extractWithNer(
     // Person-specific filtering
     if (nodeType === NodeType.Person && !isValidPersonEntity(name)) continue;
 
+    // General entity validation — reject garbage like "person", "ts", "open"
+    if (!isValidEntity(name, nodeType)) continue;
+
     const id = nameToId(name);
     if (seenIds.has(id)) continue;
     seenIds.add(id);
@@ -343,13 +378,12 @@ async function extractWithNer(
     entityPositions.push({ start: ent.start, end: ent.end });
   }
 
-  // Build co-occurrence edges using PROXIMITY FILTERING.
-  // Only create edges between entities that appear near each other in the
-  // text (within CO_OCCURRENCE_PROXIMITY chars, scaled down for short entries).
-  // This prevents spurious edges like "Kevin Kuhns" → "GLiNER" just because
-  // both appear in the same log entry.
+  // Build co-occurrence edges using PROXIMITY FILTERING + SIGNAL PHRASE MATCHING.
+  // Only create edges between entities that appear near each other in the text.
   //
-  // Additional filters:
+  // Improvements over naive proximity:
+  //  - Signal phrases classify relationship type (DependsOn, AuthoredBy, etc.)
+  //  - Weight scales inversely with distance (closer = higher weight)
   //  - Skip person-to-person edges (low signal)
   //  - Deduplicate within same extraction
   const relationships: Edge[] = [];
@@ -385,15 +419,49 @@ async function extractWithNer(
       if (seenEdges.has(key)) continue;
       seenEdges.add(key);
 
-      relationships.push(
-        buildEdge(
-          src.id,
-          tgt.id,
-          RelationshipType.RelatesTo,
-          `Co-mentioned in ${entry.date}: ${entry.heading || entry.content.slice(0, 60)}`,
-          sourceAgent,
-        ),
-      );
+      // Signal phrase matching — scan the text between the two entities
+      // to determine a more specific relationship type
+      const spanStart = Math.min(posA.start, posB.start);
+      const spanEnd = Math.max(posA.end, posB.end);
+      const textBetween = entry.fullText.slice(spanStart, spanEnd).toLowerCase();
+
+      let relType: RelationshipType = RelationshipType.RelatesTo;
+      let relDescription = `Co-mentioned in ${entry.date}: ${entry.heading || entry.content.slice(0, 60)}`;
+
+      for (const pattern of RELATIONSHIP_PATTERNS) {
+        // Skip generic RelatesTo — we're trying to upgrade from that
+        if (pattern.relationship === RelationshipType.RelatesTo) continue;
+
+        // Check type constraints if specified
+        if (pattern.targetType && tgt.type !== pattern.targetType) continue;
+        if (pattern.sourceType && src.type !== pattern.sourceType) continue;
+
+        for (const phrase of pattern.signalPhrases) {
+          if (textBetween.includes(phrase)) {
+            relType = pattern.relationship;
+            relDescription = `"${phrase}" — ${entry.heading || entry.content.slice(0, 60)}`;
+            break;
+          }
+        }
+        if (relType !== RelationshipType.RelatesTo) break;
+      }
+
+      // Weight scales inversely with distance: closer = stronger signal
+      const weight = maxDist > 0
+        ? Math.max(0.3, 1.0 - (gap / maxDist) * 0.7)
+        : 1.0;
+
+      const now = new Date().toISOString();
+      relationships.push({
+        sourceId: src.id,
+        targetId: tgt.id,
+        relationship: relType,
+        weight,
+        description: relDescription,
+        sourceAgent,
+        createdAt: now,
+        lastReinforced: now,
+      });
     }
   }
 
