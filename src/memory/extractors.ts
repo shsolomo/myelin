@@ -749,20 +749,48 @@ export function resolveCodeReferences(
   const text = result.sourceEntry.fullText;
   let edgesCreated = 0;
 
+  // Find all positions where each code name appears in the text
+  const codePositions = new Map<string, number[]>();
+  for (const [codeName, codeId] of Object.entries(index)) {
+    const positions: number[] = [];
+    let idx = text.indexOf(codeName);
+    while (idx !== -1) {
+      positions.push(idx);
+      idx = text.indexOf(codeName, idx + 1);
+    }
+    if (positions.length > 0) {
+      codePositions.set(codeId, positions);
+    }
+  }
+
+  if (codePositions.size === 0) return 0;
+
   for (const entity of result.entities) {
-    // Only create edges FROM knowledge nodes that exist in the graph
     if (!graph.getNode(entity.id)) continue;
 
-    // Find code node names mentioned in the entry text
-    const matchedCodeIds = new Set<string>();
-    for (const [codeName, codeId] of Object.entries(index)) {
-      if (text.includes(codeName)) {
-        matchedCodeIds.add(codeId);
-      }
+    // Find where this entity's name appears in the text
+    const entityPositions: number[] = [];
+    let eIdx = text.indexOf(entity.name);
+    while (eIdx !== -1) {
+      entityPositions.push(eIdx);
+      eIdx = text.indexOf(entity.name, eIdx + 1);
     }
+    if (entityPositions.length === 0) continue;
 
-    // Create directional edges: knowledge → code
-    for (const codeId of matchedCodeIds) {
+    // Only link to code nodes that appear near this entity
+    for (const [codeId, codePositionList] of codePositions) {
+      let nearby = false;
+      for (const ep of entityPositions) {
+        for (const cp of codePositionList) {
+          if (Math.abs(ep - cp) <= CO_OCCURRENCE_PROXIMITY) {
+            nearby = true;
+            break;
+          }
+        }
+        if (nearby) break;
+      }
+      if (!nearby) continue;
+
       try {
         graph.addEdge(
           buildEdge(
@@ -775,7 +803,6 @@ export function resolveCodeReferences(
         );
         edgesCreated++;
       } catch {
-        // Edge already exists — reinforce it
         try {
           graph.reinforceEdge(
             entity.id,
