@@ -159,7 +159,7 @@ export function remRefine(
     nodesDecayed,
     nodesPruned,
     edgesPruned,
-    associationsCreated: 0,
+    associationsCreated: 0, // handled in NREM via resolveCodeReferences
     abstractionsMade: 0,
   };
 }

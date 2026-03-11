@@ -582,6 +582,7 @@ program
       console.log(`  Nodes decayed: ${rem.nodesDecayed}`);
       console.log(`  Nodes pruned: ${rem.nodesPruned}`);
       console.log(`  Edges pruned: ${rem.edgesPruned}`);
+      console.log(`  Associations created: ${rem.associationsCreated}`);
     }
 
     const graphStats = graph.stats();
