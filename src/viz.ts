@@ -717,17 +717,20 @@ function getHtmlPage(): string {
 
   let knownTypes = new Set();
   function populateTypeFilter(nodes) {
-    const types = new Set(nodes.map(n => n.type));
-    if (setsEqual(types, knownTypes)) return;
-    knownTypes = types;
+    // Accumulate types — never remove a type once seen so checkboxes persist
+    const newTypes = nodes.map(n => n.type);
+    let changed = false;
+    for (const t of newTypes) {
+      if (!knownTypes.has(t)) { knownTypes.add(t); changed = true; }
+    }
+    if (!changed && document.querySelectorAll('#f-type-checkboxes input').length > 0) return;
 
     const container = document.getElementById('f-type-checkboxes');
-    // Preserve currently unchecked types across refreshes
     const unchecked = new Set(
       [...container.querySelectorAll('input:not(:checked)')].map(cb => cb.value)
     );
     container.innerHTML = '';
-    [...types].sort().forEach(t => {
+    [...knownTypes].sort().forEach(t => {
       const lbl = document.createElement('label');
       const cb = document.createElement('input');
       cb.type = 'checkbox';

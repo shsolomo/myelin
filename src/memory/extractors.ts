@@ -295,10 +295,10 @@ function isValidPersonEntity(text: string): boolean {
 }
 
 // Max character distance between two NER entities for a co-occurrence edge.
-// Entities further apart in the same log entry are likely unrelated — they
-// just happen to appear in the same section (e.g., a person mentioned in a
-// standup summary and a tool discussed three paragraphs later).
+// Uses both an absolute cap and a relative cap (40% of entry length) so that
+// short entries don't degenerate into "everything connects".
 const CO_OCCURRENCE_PROXIMITY = 300;
+const CO_OCCURRENCE_RATIO = 0.4;
 
 /** Primary extraction path using GLiNER zero-shot NER. */
 async function extractWithNer(
@@ -345,15 +345,19 @@ async function extractWithNer(
 
   // Build co-occurrence edges using PROXIMITY FILTERING.
   // Only create edges between entities that appear near each other in the
-  // text (within CO_OCCURRENCE_PROXIMITY chars). This prevents spurious
-  // edges like "Kevin Kuhns" → "GLiNER" just because both appear in the
-  // same long log entry.
+  // text (within CO_OCCURRENCE_PROXIMITY chars, scaled down for short entries).
+  // This prevents spurious edges like "Kevin Kuhns" → "GLiNER" just because
+  // both appear in the same log entry.
   //
   // Additional filters:
   //  - Skip person-to-person edges (low signal)
   //  - Deduplicate within same extraction
   const relationships: Edge[] = [];
   const seenEdges = new Set<string>();
+  const maxDist = Math.min(
+    CO_OCCURRENCE_PROXIMITY,
+    Math.floor(entry.fullText.length * CO_OCCURRENCE_RATIO),
+  );
 
   for (let i = 0; i < entities.length; i++) {
     for (let j = i + 1; j < entities.length; j++) {
@@ -373,7 +377,7 @@ async function extractWithNer(
             ? posA.start - posB.end
             : 0; // overlapping spans → distance 0
 
-      if (gap > CO_OCCURRENCE_PROXIMITY) continue;
+      if (gap > maxDist) continue;
 
       // Canonical edge key (alphabetical) to avoid duplicates
       const [src, tgt] = a.id < b.id ? [a, b] : [b, a];
