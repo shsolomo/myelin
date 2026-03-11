@@ -112,8 +112,15 @@ function extractGraph(
     const params: unknown[] = [opts.minSalience ?? 0];
 
     if (opts.type) {
-      query += ' AND type = ?';
-      params.push(opts.type);
+      // Support comma-separated types for multi-select checkbox filtering
+      const types = opts.type.split(',').map((t) => t.trim()).filter(Boolean);
+      if (types.length === 1) {
+        query += ' AND type = ?';
+        params.push(types[0]);
+      } else if (types.length > 1) {
+        query += ` AND type IN (${types.map(() => '?').join(',')})`;
+        params.push(...types);
+      }
     }
     if (opts.category && hasCat) {
       query += ' AND category = ?';
@@ -379,6 +386,7 @@ function getHtmlPage(): string {
     <option value="code">Code</option>
   </select>
   <label for="f-type">Type</label>
+  <div id="f-type-checkboxes" class="checkbox-group"></div>
 
   <label for="f-salience">Min Salience</label>
   <div class="range-row">
@@ -713,15 +721,27 @@ function getHtmlPage(): string {
     if (setsEqual(types, knownTypes)) return;
     knownTypes = types;
 
-    const sel = document.getElementById('f-type');
-    const cur = sel.value;
-    sel.innerHTML = '<option value="">All</option>';
+    const container = document.getElementById('f-type-checkboxes');
+    // Preserve currently unchecked types across refreshes
+    const unchecked = new Set(
+      [...container.querySelectorAll('input:not(:checked)')].map(cb => cb.value)
+    );
+    container.innerHTML = '';
     [...types].sort().forEach(t => {
-      const opt = document.createElement('option');
-      opt.value = t; opt.textContent = t;
-      sel.appendChild(opt);
+      const lbl = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = t;
+      cb.checked = !unchecked.has(t);
+      cb.addEventListener('change', fetchGraph);
+      const dot = document.createElement('span');
+      dot.className = 'type-dot';
+      dot.style.background = TYPE_COLORS[t] || DEFAULT_COLOR;
+      lbl.appendChild(cb);
+      lbl.appendChild(dot);
+      lbl.appendChild(document.createTextNode(' ' + t));
+      container.appendChild(lbl);
     });
-    sel.value = cur;
   }
 
   function setsEqual(a, b) {

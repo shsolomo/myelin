@@ -294,6 +294,12 @@ function isValidPersonEntity(text: string): boolean {
   return true;
 }
 
+// Max character distance between two NER entities for a co-occurrence edge.
+// Entities further apart in the same log entry are likely unrelated — they
+// just happen to appear in the same section (e.g., a person mentioned in a
+// standup summary and a tool discussed three paragraphs later).
+const CO_OCCURRENCE_PROXIMITY = 300;
+
 /** Primary extraction path using GLiNER zero-shot NER. */
 async function extractWithNer(
   entry: LogEntry,
@@ -303,6 +309,8 @@ async function extractWithNer(
   const nerEntities = await ner.extractEntities(entry.fullText);
 
   const entities: Node[] = [];
+  // Track NER positions alongside nodes for proximity-based edge filtering
+  const entityPositions: Array<{ start: number; end: number }> = [];
   const seenIds = new Set<string>();
 
   for (const ent of nerEntities) {
@@ -332,13 +340,18 @@ async function extractWithNer(
         [nodeType],
       ),
     );
+    entityPositions.push({ start: ent.start, end: ent.end });
   }
 
-  // Build co-occurrence edges: entities in the same log entry are related.
-  // Use a star topology  connect non-person entities to person entities,
-  // and connect non-person entities to each other. Avoids person-to-person
-  // noise (just because two people are mentioned together doesn't mean
-  // they relate to each other in the graph sense).
+  // Build co-occurrence edges using PROXIMITY FILTERING.
+  // Only create edges between entities that appear near each other in the
+  // text (within CO_OCCURRENCE_PROXIMITY chars). This prevents spurious
+  // edges like "Kevin Kuhns" → "GLiNER" just because both appear in the
+  // same long log entry.
+  //
+  // Additional filters:
+  //  - Skip person-to-person edges (low signal)
+  //  - Deduplicate within same extraction
   const relationships: Edge[] = [];
   const seenEdges = new Set<string>();
 
@@ -349,6 +362,18 @@ async function extractWithNer(
 
       // Skip person-to-person edges (low signal)
       if (a.type === NodeType.Person && b.type === NodeType.Person) continue;
+
+      // Proximity check: gap between the two entity spans
+      const posA = entityPositions[i];
+      const posB = entityPositions[j];
+      const gap =
+        posA.end <= posB.start
+          ? posB.start - posA.end
+          : posB.end <= posA.start
+            ? posA.start - posB.end
+            : 0; // overlapping spans → distance 0
+
+      if (gap > CO_OCCURRENCE_PROXIMITY) continue;
 
       // Canonical edge key (alphabetical) to avoid duplicates
       const [src, tgt] = a.id < b.id ? [a, b] : [b, a];
