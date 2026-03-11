@@ -352,6 +352,20 @@ function getHtmlPage(): string {
     font-weight: 300; letter-spacing: 0.5px;
   }
   #title span { color: #74b9ff; font-weight: 600; }
+.checkbox-group {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;
+}
+.checkbox-group label {
+  display: flex; align-items: center; gap: 3px;
+  font-size: 11px; cursor: pointer; padding: 2px 6px;
+  border-radius: 4px; border: 1px solid #444;
+  transition: background 0.15s;
+}
+.checkbox-group label:hover { background: #333; }
+.checkbox-group input[type="checkbox"] { margin: 0; cursor: pointer; }
+.checkbox-group .type-dot {
+  width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+}
 </style>
 </head>
 <body>
@@ -365,7 +379,7 @@ function getHtmlPage(): string {
     <option value="code">Code</option>
   </select>
   <label for="f-type">Type</label>
-  <select id="f-type"><option value="">All</option></select>
+
   <label for="f-salience">Min Salience</label>
   <div class="range-row">
     <input type="range" id="f-salience" min="0" max="1" step="0.05" value="0">
@@ -720,7 +734,9 @@ function getHtmlPage(): string {
   async function fetchGraph() {
     const params = new URLSearchParams();
     const cat = document.getElementById('f-category').value;
-    const type = document.getElementById('f-type').value;
+    const checkedTypes = [...document.querySelectorAll('#f-type-checkboxes input:checked')].map(cb => cb.value);
+    const allTypes = [...document.querySelectorAll('#f-type-checkboxes input')].length;
+    const type = (checkedTypes.length > 0 && checkedTypes.length < allTypes) ? checkedTypes.join(',') : '';
     const sal = document.getElementById('f-salience').value;
 
     if (cat) params.set('category', cat);
@@ -735,7 +751,7 @@ function getHtmlPage(): string {
 
   // ── Event listeners ────────────────────────────────────────
   document.getElementById('f-category').addEventListener('change', fetchGraph);
-  document.getElementById('f-type').addEventListener('change', fetchGraph);
+  // type checkboxes have inline event listeners
 
   let salTimer = null;
   document.getElementById('f-salience').addEventListener('input', function() {
