@@ -151,6 +151,19 @@ myelin agent boot myagent
 | `myelin ingest <path>` | Ingest text documents (NER + embedding RE) |
 | `myelin ingest <path> --fast` | Ingest with proximity-only edges (no embeddings) |
 | `myelin vault <path>` | Index IDEA vault structure |
+
+## Development
+
+### Testing
+
+```bash
+npm test              # Run all tests
+npm run test:watch    # Watch mode
+```
+
+Tests are **required** for all code changes. The CI pipeline runs tests on every push and PR across Node 20/22 on Linux, Windows, and macOS. Code that ships without tests (unless impractical — e.g., CLI glue, visualization servers) will fail review.
+
+Test files live in `tests/` mirroring the `src/` structure. Use Vitest with in-memory SQLite for graph tests and mocked NER/embeddings for extraction tests.
 | `myelin query <text>` | Semantic + keyword search |
 | `myelin show <name>` | Show node and connections |
 | `myelin stats` | Graph statistics |

@@ -29,7 +29,6 @@ jobs:
 
       - name: Test
         run: npm test
-        if: hashFiles('tests/**') != ''
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
