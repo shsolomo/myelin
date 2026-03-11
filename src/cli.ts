@@ -1118,6 +1118,42 @@ program
     console.log('   onSessionEnd            — session summary auto-logged');
   });
 
+// ── Update ───────────────────────────────────────────────────────────────────
+
+program
+  .command('update')
+  .description('Update myelin to the latest version and rebuild the extension')
+  .option('--skip-extension', 'Skip rebuilding the Copilot CLI extension')
+  .action(async (opts: { skipExtension?: boolean }) => {
+    const { execSync } = await import('node:child_process');
+
+    // Step 1: Update myelin
+    console.log(chalk.cyan('Updating myelin from GitHub...'));
+    try {
+      execSync('npm install -g github:shsolomo/myelin --legacy-peer-deps', { stdio: 'inherit' });
+    } catch {
+      console.error(chalk.red('Update failed. Check your network connection and try again.'));
+      process.exit(1);
+    }
+
+    // Step 2: Show new version
+    const newPkg = JSON.parse(readFileSync(join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '..', 'package.json'), 'utf-8'));
+    console.log(chalk.green(`\n✅ Updated to myelin v${newPkg.version}`));
+
+    // Step 3: Rebuild extension
+    if (!opts.skipExtension) {
+      console.log(chalk.cyan('\nRebuilding Copilot CLI extension...'));
+      try {
+        execSync('myelin setup-extension', { stdio: 'inherit' });
+      } catch {
+        console.error(chalk.yellow('Warning: Extension rebuild failed. Run `myelin setup-extension` manually.'));
+      }
+    }
+
+    console.log('');
+    console.log(chalk.green('Done! Restart Copilot CLI or run /clear to load the updated extension.'));
+  });
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
