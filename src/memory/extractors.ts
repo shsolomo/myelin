@@ -334,10 +334,44 @@ async function extractWithNer(
     );
   }
 
+  // Build co-occurrence edges: entities in the same log entry are related.
+  // Use a star topology  connect non-person entities to person entities,
+  // and connect non-person entities to each other. Avoids person-to-person
+  // noise (just because two people are mentioned together doesn't mean
+  // they relate to each other in the graph sense).
+  const relationships: Edge[] = [];
+  const seenEdges = new Set<string>();
+
+  for (let i = 0; i < entities.length; i++) {
+    for (let j = i + 1; j < entities.length; j++) {
+      const a = entities[i];
+      const b = entities[j];
+
+      // Skip person-to-person edges (low signal)
+      if (a.type === NodeType.Person && b.type === NodeType.Person) continue;
+
+      // Canonical edge key (alphabetical) to avoid duplicates
+      const [src, tgt] = a.id < b.id ? [a, b] : [b, a];
+      const key = src.id + ":" + tgt.id;
+      if (seenEdges.has(key)) continue;
+      seenEdges.add(key);
+
+      relationships.push(
+        buildEdge(
+          src.id,
+          tgt.id,
+          RelationshipType.RelatesTo,
+          `Co-mentioned in ${entry.date}: ${entry.heading || entry.content.slice(0, 60)}`,
+          sourceAgent,
+        ),
+      );
+    }
+  }
+
   return {
     sourceEntry: entry,
     entities,
-    relationships: [],
+    relationships,
     salience: salienceScore,
   };
 }
