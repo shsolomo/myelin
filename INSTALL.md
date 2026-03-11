@@ -1,103 +1,144 @@
 # Installing Myelin
 
-Myelin is a knowledge graph memory system for AI agents. It provides semantic search, NER extraction, and brain-inspired consolidation as native Copilot CLI tools.
+Step-by-step guide to get myelin running. Takes about 5 minutes.
 
 ## Prerequisites
 
-- Node.js >= 20 (Node.js 24+ recommended for best compatibility with Copilot CLI)
-- npm
-- C++ toolchain for native addons (Visual Studio Build Tools on Windows, Xcode on macOS, build-essential on Linux)
-- Python >= 3.6 (required by node-gyp for building native modules)
-- Copilot CLI with extensions enabled (experimental feature)
+- **Node.js** >= 20 (Node.js 24+ recommended for Copilot CLI extension compatibility)
+- **npm**
+- **C++ build tools** for native addons:
+  - Windows: Visual Studio Build Tools (Desktop C++ workload)
+  - macOS: Xcode Command Line Tools (`xcode-select --install`)
+  - Linux: `build-essential` package
+- **Python** >= 3.6 (required by node-gyp)
 
-## Step 1: Install Myelin globally
+## Step 1: Install
 
 ```bash
 npm install -g github:shsolomo/myelin
 ```
 
-This installs the `myelin` CLI and compiles native dependencies (better-sqlite3, sqlite-vec, tree-sitter).
+This installs the `myelin` CLI and compiles native dependencies (better-sqlite3, sqlite-vec, tree-sitter grammars). The GLiNER ONNX model (~600MB) is included in the package.
 
-## Step 2: Initialize the knowledge graph
+## Step 2: Initialize the Graph
 
 ```bash
 myelin init
 ```
 
-This creates the graph database at `~/.copilot/.working-memory/graph.db`.
+Creates the graph database at `~/.copilot/.working-memory/graph.db`.
 
-## Step 3: Install the setup skill
+## Step 3: Index Your Content
 
-Copy the `myelin-setup` skill into your Copilot skills directory so your agent knows how to help you index code, notes, and set up agent memory:
+Pick any combination:
+
+### Code repos
 
 ```bash
-# For global skills (available in all repos)
-cp -r /path/to/myelin/skills/myelin-setup ~/.copilot/skills/myelin-setup
-
-# Or for a specific repo
-cp -r /path/to/myelin/skills/myelin-setup .github/skills/myelin-setup
+myelin parse ./path/to/repo
 ```
 
-On Windows:
-```powershell
-Copy-Item -Recurse (Join-Path (npm root -g) myelin skills myelin-setup) "$env:USERPROFILE\.copilot\skills\myelin-setup"
+Tree-sitter AST parsing extracts classes, methods, interfaces, functions, and their relationships. Supports C#, TypeScript, Python, Go, JSON, YAML, Dockerfile, PowerShell, and Bicep.
+
+### Text documents (notes, meeting recaps, etc.)
+
+```bash
+myelin ingest ./path/to/notes
 ```
 
-Once installed, ask your agent to "set up myelin" or "index my code" — the skill guides the full setup interactively.
+Chunks text files, runs zero-shot NER (GLiNER) to find entities, then uses sentence embeddings to classify relationships between them. Produces 9 typed relationship types. Fully local — no API calls.
 
-## Step 4: Install the Copilot CLI extension
+Use `--fast` to skip embedding-based relationship classification (faster, proximity-only edges):
+
+```bash
+myelin ingest ./path/to/notes --fast
+```
+
+### IDEA vault (structured notes)
+
+If you use the IDEA method (Initiatives, Domains, Expertise, Archive):
+
+```bash
+myelin vault ./path/to/vault
+```
+
+Extracts structural relationships from the vault layout: people, domains, initiatives, decisions, action items.
+
+### Agent activity logs
+
+```bash
+myelin agent log myagent finding "Auth uses JWT with 24h expiry" --tag security
+myelin consolidate --agent myagent
+```
+
+Consolidation runs the brain-inspired NREM cycle: replay logs, extract entities, score salience, transfer to graph.
+
+## Step 4: Generate Embeddings
+
+```bash
+myelin embed
+```
+
+Embeds all nodes using all-MiniLM-L6-v2 (384-dim vectors). First run downloads the model (~80MB). Required for semantic search.
+
+## Step 5: Verify
+
+```bash
+myelin stats                            # Node/edge counts, type distribution
+myelin query "your search term"         # Semantic search
+myelin show "entity name"               # Inspect node and connections
+myelin viz                              # Browser visualization
+```
+
+## Step 6: Install the Copilot CLI Extension (optional)
 
 ```bash
 myelin setup-extension
 ```
 
-This bundles Myelin into a single extension file and installs it at `~/.copilot/extensions/myelin/` with all native dependencies. The extension runs in-process with the Copilot agent — no subprocess spawning.
+Bundles myelin into a single extension file at `~/.copilot/extensions/myelin/`. Restart Copilot CLI or run `/clear` to load.
 
-## Step 5: Reload Copilot CLI
+This gives every Copilot agent these tools:
 
-Restart Copilot CLI or run `/clear` in an active session to load the extension.
+| Tool | Description |
+|------|-------------|
+| `myelin_query` | Semantic search over the knowledge graph |
+| `myelin_boot` | Load agent-specific context at session start |
+| `myelin_log` | Log structured events (decision, finding, error, etc.) |
+| `myelin_show` | Inspect a node and its connections |
+| `myelin_stats` | Graph statistics and embedding coverage |
 
-## What You Get
+Plus automatic lifecycle hooks:
+- **onSessionStart** — graph context injected before first message
+- **onUserPromptSubmitted** — relevant context added per message
+- **onSessionEnd** — session summary auto-logged
 
-### Tools (agent calls directly)
-- `myelin_query` — semantic search over the knowledge graph
-- `myelin_boot` — load agent-specific context from the graph
-- `myelin_log` — structured event logging per agent
-- `myelin_show` — inspect nodes and their connections
-- `myelin_stats` — graph statistics and embedding coverage
+## Step 7: Install the Setup Skill (optional)
 
-### Lifecycle Hooks (automatic)
-- `onSessionStart` — graph context auto-injected before the first message
-- `onUserPromptSubmitted` — relevant context silently added on every message
-- `onSessionEnd` — session summary auto-logged
-
-### Copilot Skill
-- `myelin-setup` — interactive guide for indexing code repos, notes, and agent memory
-
-## Quick Start
-
-After installation, index your first content:
+Copy the `myelin-setup` skill so your agent can guide setup interactively:
 
 ```bash
-# Index a codebase (C#, TypeScript, Python, Go, JSON, YAML, Dockerfile, Bicep, PowerShell)
-myelin code parse ./path/to/repo
-
-# Start logging agent observations
-myelin agent log myagent decision "Use event-driven architecture" --tag architecture
-
-# Consolidate logs into the knowledge graph
-myelin consolidate --agent myagent
-
-# Generate embeddings for semantic search
-myelin embed --category knowledge
-
-# Verify
-myelin stats
-myelin query "your search term"
-myelin agent boot myagent
-
-# Visualize the graph
-myelin viz
+# Global (all repos)
+cp -r $(npm root -g)/myelin/skills/myelin-setup ~/.copilot/skills/myelin-setup
 ```
 
-Or just ask your agent: **"set up myelin for this project"** — the skill handles it.
+Windows:
+```powershell
+Copy-Item -Recurse (Join-Path (npm root -g) myelin skills myelin-setup) "$env:USERPROFILE\.copilot\skills\myelin-setup"
+```
+
+Then ask your agent: **"set up myelin for this project"**
+
+## Troubleshooting
+
+### `npm install` fails with node-gyp errors
+Ensure C++ build tools and Python are installed. On Windows, run `npm install --global windows-build-tools` from an admin terminal.
+
+### Extension fails with NODE_MODULE_VERSION mismatch
+The extension's native modules must match the Copilot CLI's Node.js version. Re-run `myelin setup-extension` — it recompiles for the current Node.js.
+
+### GLiNER model not found
+The ONNX model files should be in `models/gliner/` relative to the myelin install. Run `npm install -g github:shsolomo/myelin` to reinstall with model files included.
+
+### Embedding model slow on first run
+The first call to `myelin embed` or `myelin ingest` downloads the all-MiniLM-L6-v2 model (~80MB). Subsequent runs use the cached model.

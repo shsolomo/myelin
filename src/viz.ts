@@ -216,29 +216,43 @@ function getHtmlPage(): string {
     overflow: hidden;
     height: 100vh;
     width: 100vw;
+    display: flex;
   }
 
-  svg { display: block; width: 100%; height: 100%; }
-
-  /* ── Controls panel ─────────────────────────────────────── */
-  #controls {
-    position: fixed; top: 16px; left: 16px;
-    background: rgba(22, 22, 46, 0.92);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 12px;
-    padding: 16px 18px;
+  /* ── Sidebar (controls + stats + legend combined) ────────── */
+  #sidebar {
+    width: 260px;
+    min-width: 260px;
+    height: 100vh;
+    overflow-y: auto;
+    background: rgba(22, 22, 46, 0.95);
+    border-right: 1px solid rgba(255,255,255,0.08);
+    padding: 16px;
     z-index: 10;
-    min-width: 220px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
   }
-  #controls h3 {
+  #sidebar::-webkit-scrollbar { width: 6px; }
+  #sidebar::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+  #sidebar h3 {
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 1.5px;
     color: #888;
-    margin-bottom: 10px;
+    margin-bottom: 6px;
   }
+
+  .panel-section {
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    padding-bottom: 12px;
+  }
+  .panel-section:last-child { border-bottom: none; }
+
+  svg { display: block; flex: 1; height: 100vh; }
+
+  /* ── Controls (in sidebar) ───────────────────────────────── */
   #controls label {
     display: block;
     font-size: 12px;
@@ -277,51 +291,23 @@ function getHtmlPage(): string {
     text-align: right;
   }
   #node-count {
-    margin-top: 12px;
+    margin-top: 8px;
     font-size: 12px;
     color: #666;
     text-align: center;
   }
 
-  /* ── Stats panel ────────────────────────────────────────── */
-  #stats {
-    position: fixed; top: 16px; right: 16px;
-    background: rgba(22, 22, 46, 0.92);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 12px;
-    padding: 14px 18px;
-    z-index: 10;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-    text-align: right;
-  }
+  /* ── Stats (in sidebar) ──────────────────────────────────── */
   #stats .stat-row {
+    display: flex;
+    justify-content: space-between;
     font-size: 12px; color: #888; margin-bottom: 4px;
   }
   #stats .stat-val {
-    font-size: 16px; font-weight: 600; color: #e0e0e0;
+    font-size: 14px; font-weight: 600; color: #e0e0e0;
   }
 
-  /* ── Legend ──────────────────────────────────────────────── */
-  #legend {
-    position: fixed; bottom: 16px; right: 16px;
-    background: rgba(22, 22, 46, 0.92);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 12px;
-    padding: 14px 18px;
-    z-index: 10;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-    max-height: 280px;
-    overflow-y: auto;
-  }
-  #legend h3 {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    color: #888;
-    margin-bottom: 8px;
-  }
+  /* ── Legend (in sidebar) ─────────────────────────────────── */
   .legend-item {
     display: flex; align-items: center; gap: 8px;
     font-size: 12px; color: #bbb; margin-bottom: 4px;
@@ -330,7 +316,7 @@ function getHtmlPage(): string {
     width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
   }
 
-  /* ── Tooltip ────────────────────────────────────────────── */
+  /* ── Tooltip (floating) ─────────────────────────────────── */
   #tooltip {
     position: fixed;
     pointer-events: none;
@@ -352,11 +338,12 @@ function getHtmlPage(): string {
   #tooltip .tt-sal { color: #74b9ff; margin-top: 4px; }
   #tooltip .tt-desc { color: #aaa; margin-top: 4px; line-height: 1.4; }
 
-  /* ── Title ──────────────────────────────────────────────── */
+  /* ── Title (bottom of sidebar) ──────────────────────────── */
   #title {
-    position: fixed; bottom: 16px; left: 16px;
-    font-size: 13px; color: #444; z-index: 10;
+    font-size: 13px; color: #444;
     font-weight: 300; letter-spacing: 0.5px;
+    text-align: center;
+    padding-top: 8px;
   }
   #title span { color: #74b9ff; font-weight: 600; }
 .checkbox-group {
@@ -377,31 +364,34 @@ function getHtmlPage(): string {
 </head>
 <body>
 
-<div id="controls">
-  <h3>Filters</h3>
-  <label for="f-category">Category</label>
-  <select id="f-category">
-    <option value="">All</option>
-    <option value="knowledge">Knowledge</option>
-    <option value="code">Code</option>
-  </select>
-  <label for="f-type">Type</label>
-  <div id="f-type-checkboxes" class="checkbox-group"></div>
+<div id="sidebar">
+  <div id="controls" class="panel-section">
+    <h3>Filters</h3>
+    <label for="f-category">Category</label>
+    <select id="f-category">
+      <option value="">All</option>
+      <option value="knowledge">Knowledge</option>
+      <option value="code">Code</option>
+    </select>
+    <label for="f-type">Type</label>
+    <div id="f-type-checkboxes" class="checkbox-group"></div>
 
-  <label for="f-salience">Min Salience</label>
-  <div class="range-row">
-    <input type="range" id="f-salience" min="0" max="1" step="0.05" value="0">
-    <span class="range-val" id="sal-val">0.00</span>
+    <label for="f-salience">Min Salience</label>
+    <div class="range-row">
+      <input type="range" id="f-salience" min="0" max="1" step="0.05" value="0">
+      <span class="range-val" id="sal-val">0.00</span>
+    </div>
+    <label for="f-search">Search</label>
+    <input type="text" id="f-search" placeholder="Node name…">
+    <div id="node-count"></div>
   </div>
-  <label for="f-search">Search</label>
-  <input type="text" id="f-search" placeholder="Node name…">
-  <div id="node-count"></div>
+
+  <div id="stats" class="panel-section"></div>
+  <div id="legend" class="panel-section"></div>
+  <div id="title"><span>myelin</span> knowledge graph</div>
 </div>
 
-<div id="stats"></div>
-<div id="legend"></div>
 <div id="tooltip"></div>
-<div id="title"><span>myelin</span> knowledge graph</div>
 
 <svg id="graph"></svg>
 
