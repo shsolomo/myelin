@@ -268,6 +268,32 @@ function buildEdge(
 // Internal extraction paths
 // ---------------------------------------------------------------------------
 
+/** Known agent names that GLiNER may classify as persons. */
+const AGENT_NAMES = new Set([
+  "donna", "moneypenny", "monday", "skippy", "coco",
+  "consolidator", "ado-analyst", "scribe", "scout",
+  "vault-librarian", "researcher", "copilot",
+]);
+
+/** Filter out low-quality person matches from NER output. */
+function isValidPersonEntity(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+
+  // Reject agent names
+  if (AGENT_NAMES.has(lower)) return false;
+
+  // Reject pronouns and common words
+  if (["he", "she", "they", "it", "we", "i", "me", "you"].includes(lower)) return false;
+
+  // Reject single characters
+  if (text.trim().length <= 2) return false;
+
+  // Reject if it contains special chars (/, +, &, @)  these are compound references
+  if (/[\/+&@]/.test(text)) return false;
+
+  return true;
+}
+
 /** Primary extraction path using GLiNER zero-shot NER. */
 async function extractWithNer(
   entry: LogEntry,
@@ -277,48 +303,35 @@ async function extractWithNer(
   const nerEntities = await ner.extractEntities(entry.fullText);
 
   const entities: Node[] = [];
-  const seenNames = new Set<string>();
-  // Track which non-person types we've already emitted (one per type per entry)
-  const seenTypes = new Set<string>();
+  const seenIds = new Set<string>();
 
   for (const ent of nerEntities) {
     const nodeType = LABEL_TO_NODE_TYPE[ent.label];
     if (nodeType === undefined) continue;
 
-    if (nodeType === NodeType.Person) {
-      const name = ent.text.trim();
-      if (name && !seenNames.has(name)) {
-        seenNames.add(name);
-        entities.push(
-          buildNode(
-            nameToId(name),
-            NodeType.Person,
-            name,
-            `Mentioned in ${entry.date} log entry`,
-            salienceScore,
-            sourceAgent,
-            ["person"],
-          ),
-        );
-      }
-    } else {
-      // Non-person: use entry heading as node name, NER match determines type
-      if (seenTypes.has(nodeType)) continue;
-      if (!entry.heading || seenNames.has(entry.heading)) continue;
-      seenTypes.add(nodeType);
-      seenNames.add(entry.heading);
-      entities.push(
-        buildNode(
-          nameToId(entry.heading),
-          nodeType,
-          entry.heading,
-          extractSummary(entry.content, 200),
-          salienceScore,
-          sourceAgent,
-          [nodeType],
-        ),
-      );
-    }
+    const name = ent.text.trim();
+    if (!name) continue;
+
+    // Person-specific filtering
+    if (nodeType === NodeType.Person && !isValidPersonEntity(name)) continue;
+
+    const id = nameToId(name);
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+
+    entities.push(
+      buildNode(
+        id,
+        nodeType,
+        name,
+        nodeType === NodeType.Person
+          ? `Mentioned in ${entry.date} log entry`
+          : extractSummary(entry.content, 200),
+        salienceScore,
+        sourceAgent,
+        [nodeType],
+      ),
+    );
   }
 
   return {
@@ -489,10 +502,15 @@ export async function extractFromEntry(
 ): Promise<ExtractionResult> {
   const salience = scoreEntry(entry);
 
-  if (ner.isAvailable()) {
-    return extractWithNer(entry, salience.combined, sourceAgent);
+  // Always try NER first  it lazy-loads on first call.
+  // isAvailable() is only true after the first extractEntities() call,
+  // so we can't gate on it before trying.
+  const nerResult = await extractWithNer(entry, salience.combined, sourceAgent);
+  if (nerResult.entities.length > 0) {
+    return nerResult;
   }
 
+  // NER returned nothing (model unavailable or no entities found)  regex fallback
   return extractWithRegex(entry, salience.combined, sourceAgent);
 }
 
