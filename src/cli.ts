@@ -936,6 +936,53 @@ program
     }
   });
 
+// ── General Document Ingestion ───────────────────────────────────────────────
+
+program
+  .command('ingest')
+  .argument('<path>', 'Path to a file or directory to ingest')
+  .description('Ingest text documents into the knowledge graph (local NER + embedding-based RE)')
+  .option('--namespace <ns>', 'Namespace for ingested nodes')
+  .option('--agent <name>', 'Source agent name', 'ingest')
+  .option('--fast', 'Skip embedding-based relationship classification (proximity only)')
+  .option('--db <path>', 'Path to graph.db')
+  .action(async (targetPath: string, opts: { namespace?: string; agent: string; fast?: boolean; db?: string }) => {
+    const { ingestDirectory } = await import('./memory/ingest.js');
+    const { resolve } = await import('node:path');
+
+    const resolvedPath = resolve(targetPath);
+    const dbPath = opts.db ?? join(homedir(), '.copilot', '.working-memory', 'graph.db');
+
+    if (!existsSync(resolvedPath)) {
+      console.error(`Path not found: ${resolvedPath}`);
+      process.exit(1);
+    }
+
+    console.log(`Ingesting: ${resolvedPath}${opts.fast ? ' (fast mode — proximity only)' : ''}`);
+    const graph = new KnowledgeGraph(dbPath);
+    const result = await ingestDirectory(graph, resolvedPath, {
+      namespace: opts.namespace,
+      sourceAgent: opts.agent,
+      fast: opts.fast,
+    });
+
+    console.log('\nIngestion Results');
+    console.log('─'.repeat(40));
+    console.log(`Files processed:       ${result.filesProcessed}`);
+    console.log(`Chunks processed:      ${result.chunksProcessed}`);
+    console.log(`Chunks with entities:  ${result.chunksWithEntities}`);
+    console.log(`Entities extracted:    ${result.entitiesExtracted}`);
+    console.log(`Nodes added:           ${result.nodesAdded}`);
+    console.log(`Nodes reinforced:      ${result.nodesReinforced}`);
+    console.log(`Edges added:           ${result.edgesAdded}`);
+    if (Object.keys(result.relationshipTypes).length > 0) {
+      console.log(`\nRelationship types:`);
+      for (const [rel, count] of Object.entries(result.relationshipTypes).sort((a, b) => b[1] - a[1])) {
+        console.log(`  ${rel}: ${count}`);
+      }
+    }
+  });
+
 // ── Vault Indexing ───────────────────────────────────────────────────────────
 
 program
