@@ -4,9 +4,10 @@ Myelin is a knowledge graph memory system for AI agents. It provides semantic se
 
 ## Prerequisites
 
-- Node.js >= 20
+- Node.js >= 20 (Node.js 24+ recommended for best compatibility with Copilot CLI)
 - npm
 - C++ toolchain for native addons (Visual Studio Build Tools on Windows, Xcode on macOS, build-essential on Linux)
+- Python >= 3.6 (required by node-gyp for building native modules)
 - Copilot CLI with extensions enabled (experimental feature)
 
 ## Step 1: Install Myelin globally

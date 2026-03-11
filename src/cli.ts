@@ -998,7 +998,7 @@ program
       private: true,
       type: 'module',
       dependencies: {
-        'better-sqlite3': '^11.0.0',
+        'better-sqlite3': '^12.0.0',
         'sqlite-vec': '^0.1.6',
         '@huggingface/transformers': '^3.0.0',
         'onnxruntime-node': '^1.21.0',
