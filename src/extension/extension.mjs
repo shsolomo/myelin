@@ -19,23 +19,12 @@ function runMyelin(args) {
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { appendFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, existsSync } from "node:fs";
 
 const WORKING_MEMORY = join(homedir(), ".copilot", ".working-memory");
-const CONFIG_PATH = join(WORKING_MEMORY, "myelin.json");
-const DEFAULT_AGENT = "agent";
+const DB_PATH = join(WORKING_MEMORY, "graph.db");
 
-function resolveAgent() {
-  const envAgent = process.env.MYELIN_AGENT;
-  if (envAgent) return envAgent;
-  try {
-    if (existsSync(CONFIG_PATH)) {
-      const config = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
-      if (config.defaultAgent) return config.defaultAgent;
-    }
-  } catch {}
-  return DEFAULT_AGENT;
-}
+let sessionAgent = null;
 
 function writeLog(agent, type, summary, tags) {
   const dir = join(homedir(), ".copilot", ".working-memory", "agents", agent);
@@ -52,11 +41,15 @@ const session = await joinSession({
   hooks: {
     onSessionStart: async () => {
       try {
-        const agent = resolveAgent();
-        const context = await runMyelin(["agent", "boot", agent]);
-        if (context && !context.startsWith("Error:") && !context.includes("No graph nodes")) {
-          return { additionalContext: "## Graph Knowledge (Myelin)\n\n" + context };
-        }
+        if (!existsSync(DB_PATH)) return;
+        return {
+          additionalContext: [
+            "## Myelin Knowledge Graph",
+            "You have access to a persistent knowledge graph via Myelin tools (myelin_query, myelin_boot, myelin_log, myelin_show, myelin_stats).",
+            "Call `myelin_boot` with your agent name as the first step to load your domain-specific context from the graph.",
+            "Use `myelin_log` to record important decisions, findings, and actions during your session.",
+          ].join("\n"),
+        };
       } catch {}
     },
     onUserPromptSubmitted: async (input) => {
@@ -68,10 +61,9 @@ const session = await joinSession({
       } catch {}
     },
     onSessionEnd: async (input) => {
-      if (input.finalMessage) {
+      if (input.finalMessage && sessionAgent) {
         try {
-          const agent = resolveAgent();
-          writeLog(agent, "handover", input.finalMessage.slice(0, 200), ["auto-session-end"]);
+          writeLog(sessionAgent, "handover", input.finalMessage.slice(0, 200), ["auto-session-end"]);
         } catch {}
       }
     },
@@ -103,11 +95,14 @@ const session = await joinSession({
       parameters: {
         type: "object",
         properties: {
-          agent: { type: "string", description: "Agent name (e.g., donna, researcher)" },
+          agent: { type: "string", description: "Your agent name — used to load agent-specific graph context" },
         },
         required: ["agent"],
       },
-      handler: async (args) => await runMyelin(["agent", "boot", args.agent]),
+      handler: async (args) => {
+        sessionAgent = args.agent;
+        return await runMyelin(["agent", "boot", args.agent]);
+      },
     },
     {
       name: "myelin_log",

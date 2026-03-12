@@ -5,7 +5,7 @@
  * It imports myelin's graph library directly — no subprocess spawning.
  *
  * Tools: myelin_query, myelin_boot, myelin_log, myelin_show, myelin_stats
- * Hooks: onSessionStart (auto-boot), onSessionEnd (auto-log),
+ * Hooks: onSessionStart (boot prompt), onSessionEnd (auto-log),
  *        onUserPromptSubmitted (context injection), onErrorOccurred (resilience)
  */
 
@@ -21,31 +21,10 @@ import { getEmbedding } from "../memory/embeddings.js";
 
 const WORKING_MEMORY = join(homedir(), ".copilot", ".working-memory");
 const DB_PATH = join(WORKING_MEMORY, "graph.db");
-const CONFIG_PATH = join(WORKING_MEMORY, "myelin.json");
 const MYELIN_VERSION = "0.3.1";
-const DEFAULT_AGENT = "agent";
 
-/**
- * Resolve the active agent name.
- * Priority: MYELIN_AGENT env var > myelin.json config > "agent" fallback.
- */
-function resolveAgent(): string {
-  // 1. Environment variable (highest priority — set per-process)
-  const envAgent = process.env.MYELIN_AGENT;
-  if (envAgent) return envAgent;
-
-  // 2. Config file
-  try {
-    if (existsSync(CONFIG_PATH)) {
-      const config = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
-      if (config.defaultAgent) return config.defaultAgent;
-    }
-  } catch {
-    // Malformed config — fall through
-  }
-
-  return DEFAULT_AGENT;
-}
+// Session-level agent identity — set when myelin_boot is called
+let sessionAgent: string | null = null;
 
 /** Get a graph instance, or null if db doesn't exist. */
 function getGraph(): KnowledgeGraph | null {
@@ -66,13 +45,14 @@ const session = await joinSession({
           return;
         }
 
-        const agent = resolveAgent();
-        const context = getBootContext(agent, { dbPath: DB_PATH });
-        if (context && !context.includes("No graph nodes found")) {
-          return {
-            additionalContext: `## Graph Knowledge (auto-loaded by Myelin)\n\n${context}`,
-          };
-        }
+        return {
+          additionalContext: [
+            "## Myelin Knowledge Graph",
+            "You have access to a persistent knowledge graph via Myelin tools (myelin_query, myelin_boot, myelin_log, myelin_show, myelin_stats).",
+            "Call `myelin_boot` with your agent name as the first step to load your domain-specific context from the graph.",
+            "Use `myelin_log` to record important decisions, findings, and actions during your session.",
+          ].join("\n"),
+        };
       } catch (e: any) {
         await session.log(`Myelin boot error: ${e.message}`, { level: "error" });
       }
@@ -109,10 +89,9 @@ const session = await joinSession({
     },
 
     onSessionEnd: async (input: any, _invocation: any) => {
-      if (input.finalMessage) {
+      if (input.finalMessage && sessionAgent) {
         try {
-          const agent = resolveAgent();
-          appendStructuredLog(agent, "handover", input.finalMessage.slice(0, 200), {
+          appendStructuredLog(sessionAgent, "handover", input.finalMessage.slice(0, 200), {
             tags: ["auto-session-end"],
           });
         } catch {
@@ -182,12 +161,13 @@ const session = await joinSession({
       parameters: {
         type: "object",
         properties: {
-          agent: { type: "string", description: "Agent name (e.g., donna, researcher)" },
+          agent: { type: "string", description: "Your agent name — used to load agent-specific graph context" },
         },
         required: ["agent"],
       },
       handler: async (args: any) => {
         try {
+          sessionAgent = args.agent;
           return getBootContext(args.agent, { dbPath: DB_PATH });
         } catch (e: any) {
           return `Error: ${e.message}`;
