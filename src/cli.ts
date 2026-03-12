@@ -1048,6 +1048,18 @@ program
     });
   });
 
+// ── NER Extraction API ───────────────────────────────────────────────────────
+
+program
+  .command('serve')
+  .description('Start the NER extraction API server for real-time entity extraction')
+  .option('--port <n>', 'HTTP port (default: 3000)', parseInt, 3000)
+  .option('--host <addr>', 'Bind address (default: 127.0.0.1)', '127.0.0.1')
+  .action(async (opts) => {
+    const { startApiServer } = await import('./api.js');
+    await startApiServer({ port: opts.port, host: opts.host });
+  });
+
 // ── Setup Extension ──────────────────────────────────────────────────────────
 
 program

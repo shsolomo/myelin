@@ -20,3 +20,16 @@ export {
   initSchema,
   extendSchemaForCode,
 } from './memory/schema.js';
+
+export {
+  detectRelationships,
+  startApiServer,
+} from './api.js';
+
+export type {
+  ExtractRequest,
+  ExtractResponse,
+  ExtractedRelationship,
+  HealthResponse,
+  ServeOptions,
+} from './api.js';
