@@ -11,7 +11,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { KnowledgeGraph } from "../memory/graph.js";
@@ -19,8 +19,33 @@ import { getBootContext, appendStructuredLog } from "../memory/agents.js";
 import { readLogEntries } from "../memory/structured-log.js";
 import { getEmbedding } from "../memory/embeddings.js";
 
-const DB_PATH = join(homedir(), ".copilot", ".working-memory", "graph.db");
+const WORKING_MEMORY = join(homedir(), ".copilot", ".working-memory");
+const DB_PATH = join(WORKING_MEMORY, "graph.db");
+const CONFIG_PATH = join(WORKING_MEMORY, "myelin.json");
 const MYELIN_VERSION = "0.3.1";
+const DEFAULT_AGENT = "agent";
+
+/**
+ * Resolve the active agent name.
+ * Priority: MYELIN_AGENT env var > myelin.json config > "agent" fallback.
+ */
+function resolveAgent(): string {
+  // 1. Environment variable (highest priority — set per-process)
+  const envAgent = process.env.MYELIN_AGENT;
+  if (envAgent) return envAgent;
+
+  // 2. Config file
+  try {
+    if (existsSync(CONFIG_PATH)) {
+      const config = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
+      if (config.defaultAgent) return config.defaultAgent;
+    }
+  } catch {
+    // Malformed config — fall through
+  }
+
+  return DEFAULT_AGENT;
+}
 
 /** Get a graph instance, or null if db doesn't exist. */
 function getGraph(): KnowledgeGraph | null {
@@ -41,7 +66,8 @@ const session = await joinSession({
           return;
         }
 
-        const context = getBootContext("donna", { dbPath: DB_PATH });
+        const agent = resolveAgent();
+        const context = getBootContext(agent, { dbPath: DB_PATH });
         if (context && !context.includes("No graph nodes found")) {
           return {
             additionalContext: `## Graph Knowledge (auto-loaded by Myelin)\n\n${context}`,
@@ -85,7 +111,8 @@ const session = await joinSession({
     onSessionEnd: async (input: any, _invocation: any) => {
       if (input.finalMessage) {
         try {
-          appendStructuredLog("donna", "handover", input.finalMessage.slice(0, 200), {
+          const agent = resolveAgent();
+          appendStructuredLog(agent, "handover", input.finalMessage.slice(0, 200), {
             tags: ["auto-session-end"],
           });
         } catch {

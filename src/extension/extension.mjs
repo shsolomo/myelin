@@ -17,10 +17,25 @@ function runMyelin(args) {
   });
 }
 
-// Structured log writer (no DB needed  direct JSONL file append)
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { appendFileSync, mkdirSync, existsSync } from "node:fs";
+import { appendFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
+
+const WORKING_MEMORY = join(homedir(), ".copilot", ".working-memory");
+const CONFIG_PATH = join(WORKING_MEMORY, "myelin.json");
+const DEFAULT_AGENT = "agent";
+
+function resolveAgent() {
+  const envAgent = process.env.MYELIN_AGENT;
+  if (envAgent) return envAgent;
+  try {
+    if (existsSync(CONFIG_PATH)) {
+      const config = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
+      if (config.defaultAgent) return config.defaultAgent;
+    }
+  } catch {}
+  return DEFAULT_AGENT;
+}
 
 function writeLog(agent, type, summary, tags) {
   const dir = join(homedir(), ".copilot", ".working-memory", "agents", agent);
@@ -37,7 +52,8 @@ const session = await joinSession({
   hooks: {
     onSessionStart: async () => {
       try {
-        const context = await runMyelin(["agent", "boot", "donna"]);
+        const agent = resolveAgent();
+        const context = await runMyelin(["agent", "boot", agent]);
         if (context && !context.startsWith("Error:") && !context.includes("No graph nodes")) {
           return { additionalContext: "## Graph Knowledge (Myelin)\n\n" + context };
         }
@@ -54,7 +70,8 @@ const session = await joinSession({
     onSessionEnd: async (input) => {
       if (input.finalMessage) {
         try {
-          writeLog("donna", "handover", input.finalMessage.slice(0, 200), ["auto-session-end"]);
+          const agent = resolveAgent();
+          writeLog(agent, "handover", input.finalMessage.slice(0, 200), ["auto-session-end"]);
         } catch {}
       }
     },
