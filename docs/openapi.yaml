@@ -1,0 +1,377 @@
+openapi: "3.1.0"
+info:
+  title: Myelin NER Extraction API
+  description: |
+    Stateless entity extraction service powered by myelin's zero-shot NER
+    (GLiNER/ONNX). Send raw text with custom entity labels, get back
+    structured entities and co-occurrence relationships.
+
+    **Use case**: Pipe real-time meeting transcription through this API to
+    extract epics, features, teams, dependencies, and gaps for live backlog
+    visualization during semester planning.
+
+    **Labels are fully configurable** — GLiNER is zero-shot, so you can
+    define any entity types relevant to your domain (e.g., "epic", "feature",
+    "user story", "risk", "gap"). If omitted, defaults to myelin's built-in
+    knowledge-graph labels.
+  version: "1.0.0"
+  contact:
+    name: Shane Solomon
+    url: https://github.com/shsolomo/myelin
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: http://localhost:3000
+    description: Local development server (default port)
+
+paths:
+  /api/extract:
+    post:
+      operationId: extractEntities
+      summary: Extract entities and relationships from text
+      description: |
+        Runs zero-shot NER on the input text using the specified labels,
+        then detects co-occurrence relationships between extracted entities
+        based on proximity and signal phrase matching.
+
+        **Custom labels**: Pass any labels relevant to your domain. GLiNER
+        treats labels as part of the input — no retraining needed.
+
+        **Relationships**: Entities appearing near each other in the text
+        (within ~300 chars or 40% of text length) are linked. Signal phrases
+        like "depends on", "part of", "created by" upgrade the generic
+        `relates_to` to a specific relationship type.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExtractRequest"
+            examples:
+              planning:
+                summary: Semester planning transcription
+                value:
+                  text: >-
+                    We need an epic for TLS certificate rotation. The rotation
+                    feature depends on the platform team finishing the key vault
+                    integration. There's a gap around automated rollback — nobody
+                    has discussed what happens when rotation fails mid-flight.
+                  labels:
+                    - epic
+                    - feature
+                    - user story
+                    - team
+                    - dependency
+                    - risk
+                    - gap
+                  threshold: 0.3
+              minimal:
+                summary: Minimal request (default labels)
+                value:
+                  text: >-
+                    Shane and Jeff discussed the gateway service architecture.
+                    The decision was to use gRPC instead of REST for internal
+                    communication.
+              custom-threshold:
+                summary: High-confidence only
+                value:
+                  text: >-
+                    The auth module needs a complete rewrite. Ian created the
+                    original design but it conflicts with the new zero-trust
+                    architecture.
+                  labels:
+                    - person
+                    - software tool
+                    - architectural decision
+                  threshold: 0.6
+      responses:
+        "200":
+          description: Extraction successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExtractResponse"
+              examples:
+                planning:
+                  summary: Planning entities extracted
+                  value:
+                    entities:
+                      - text: TLS certificate rotation
+                        label: epic
+                        score: 0.92
+                        start: 20
+                        end: 44
+                      - text: platform team
+                        label: team
+                        score: 0.87
+                        start: 80
+                        end: 93
+                      - text: key vault integration
+                        label: feature
+                        score: 0.84
+                        start: 108
+                        end: 128
+                      - text: automated rollback
+                        label: gap
+                        score: 0.78
+                        start: 148
+                        end: 166
+                    relationships:
+                      - source: TLS certificate rotation
+                        target: platform team
+                        sourceLabel: epic
+                        targetLabel: team
+                        relationship: depends_on
+                        weight: 0.85
+                        evidence: depends on
+                      - source: key vault integration
+                        target: platform team
+                        sourceLabel: feature
+                        targetLabel: team
+                        relationship: relates_to
+                        weight: 0.72
+                        evidence: "co-mentioned within 15 chars"
+                    processingMs: 142
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                missing-text:
+                  value:
+                    error: 'Missing or invalid "text" field'
+                bad-json:
+                  value:
+                    error: Invalid JSON body
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/health:
+    get:
+      operationId: healthCheck
+      summary: Check server and model status
+      description: |
+        Returns whether the NER model is loaded and ready. The model
+        lazy-loads on first request and stays cached. If the model files
+        are missing, extraction returns empty results (no crash).
+      responses:
+        "200":
+          description: Health status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              examples:
+                ready:
+                  value:
+                    status: ready
+                    modelLoaded: true
+                unavailable:
+                  value:
+                    status: model_unavailable
+                    modelLoaded: false
+
+  /api/openapi.json:
+    get:
+      operationId: getOpenApiSpec
+      summary: Get this OpenAPI specification
+      description: Returns the OpenAPI 3.1 spec as JSON for agent consumption.
+      responses:
+        "200":
+          description: OpenAPI spec
+          content:
+            application/json:
+              schema:
+                type: object
+
+components:
+  schemas:
+    ExtractRequest:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          description: |
+            The text to extract entities from. Can be any length — a single
+            sentence, a paragraph, or a full meeting transcript chunk.
+          example: >-
+            We need an epic for TLS rotation that depends on the platform team.
+        labels:
+          type: array
+          items:
+            type: string
+          description: |
+            Entity labels to detect. GLiNER is zero-shot — any descriptive
+            label works without retraining. If omitted, uses myelin's defaults:
+            person, software tool, architectural decision, bug or error,
+            design pattern, project or initiative, meeting or ceremony,
+            operational rule.
+          example:
+            - epic
+            - feature
+            - user story
+            - team
+            - dependency
+            - risk
+            - gap
+        threshold:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.3
+          description: |
+            Minimum confidence score (0–1) for entity extraction. Higher
+            values return fewer, more confident matches. Default 0.3 balances
+            recall and precision. Use 0.5+ for high-confidence only.
+
+    ExtractResponse:
+      type: object
+      required:
+        - entities
+        - relationships
+        - processingMs
+      properties:
+        entities:
+          type: array
+          items:
+            $ref: "#/components/schemas/NEREntity"
+          description: Extracted entities sorted by position in the text.
+        relationships:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExtractedRelationship"
+          description: |
+            Co-occurrence relationships between entities. Detected via
+            proximity (entities within ~300 chars) and signal phrase matching.
+        processingMs:
+          type: integer
+          description: Processing time in milliseconds.
+
+    NEREntity:
+      type: object
+      required:
+        - text
+        - label
+        - score
+        - start
+        - end
+      properties:
+        text:
+          type: string
+          description: The extracted entity text as it appears in the source.
+          example: TLS certificate rotation
+        label:
+          type: string
+          description: The matched label from the request's labels array.
+          example: epic
+        score:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Confidence score (0–1) from the NER model.
+          example: 0.92
+        start:
+          type: integer
+          description: Start character offset in the source text (0-indexed).
+          example: 20
+        end:
+          type: integer
+          description: End character offset in the source text (exclusive).
+          example: 44
+
+    ExtractedRelationship:
+      type: object
+      required:
+        - source
+        - target
+        - sourceLabel
+        - targetLabel
+        - relationship
+        - weight
+        - evidence
+      properties:
+        source:
+          type: string
+          description: Source entity text (alphabetically first of the pair).
+          example: TLS certificate rotation
+        target:
+          type: string
+          description: Target entity text (alphabetically second of the pair).
+          example: platform team
+        sourceLabel:
+          type: string
+          description: Label of the source entity.
+          example: epic
+        targetLabel:
+          type: string
+          description: Label of the target entity.
+          example: team
+        relationship:
+          type: string
+          description: |
+            Inferred relationship type. Defaults to `relates_to` unless a
+            signal phrase is detected in the text between the entities.
+          enum:
+            - relates_to
+            - depends_on
+            - supersedes
+            - learned_from
+            - belongs_to
+            - authored_by
+            - mentioned_in
+            - evolved_into
+            - conflicts_with
+          example: depends_on
+        weight:
+          type: number
+          minimum: 0.3
+          maximum: 1.0
+          description: |
+            Relationship strength (0.3–1.0). Scales inversely with character
+            distance between entities. Overlapping spans get weight 1.0.
+          example: 0.85
+        evidence:
+          type: string
+          description: |
+            Why this relationship was inferred. Either a matched signal phrase
+            (e.g., "depends on") or a proximity note (e.g., "co-mentioned
+            within 15 chars").
+          example: depends on
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - modelLoaded
+      properties:
+        status:
+          type: string
+          enum:
+            - ready
+            - model_unavailable
+          description: |
+            `ready` when the GLiNER ONNX model is loaded. `model_unavailable`
+            if model files are missing — extraction will return empty results.
+        modelLoaded:
+          type: boolean
+          description: Whether the NER model is currently loaded in memory.
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+          example: 'Missing or invalid "text" field'

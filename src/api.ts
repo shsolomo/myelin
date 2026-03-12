@@ -6,8 +6,9 @@
  * entities and co-occurrence relationships — no graph storage required.
  *
  * Endpoints:
- *   POST /api/extract  — Extract entities and relationships from text
- *   GET  /api/health   — Check model readiness
+ *   POST /api/extract       — Extract entities and relationships from text
+ *   GET  /api/health        — Check model readiness
+ *   GET  /api/openapi.json  — OpenAPI 3.1 spec for agent consumption
  */
 
 import {
@@ -16,6 +17,9 @@ import {
   type ServerResponse,
   type Server,
 } from "node:http";
+import { readFileSync, existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { extractEntities, isAvailable, type NEREntity } from "./memory/ner.js";
 import { RELATIONSHIP_PATTERNS } from "./memory/vocabulary.js";
 
@@ -199,6 +203,36 @@ function handleHealth(_req: IncomingMessage, res: ServerResponse): void {
   sendJson(res, 200, response);
 }
 
+/** Resolve docs/openapi.yaml relative to this source file. */
+function getOpenApiPath(): string {
+  const thisFile = fileURLToPath(import.meta.url);
+  const srcOrDist = dirname(thisFile);
+  const repoRoot = dirname(srcOrDist);
+  return join(repoRoot, "docs", "openapi.yaml");
+}
+
+let _openApiJson: string | null = null;
+
+function handleOpenApi(_req: IncomingMessage, res: ServerResponse): void {
+  if (!_openApiJson) {
+    const yamlPath = getOpenApiPath();
+    if (!existsSync(yamlPath)) {
+      sendJson(res, 404, { error: "OpenAPI spec not found" });
+      return;
+    }
+    // Serve the YAML as-is with appropriate content type.
+    // Most OpenAPI consumers handle YAML natively.
+    const yaml = readFileSync(yamlPath, "utf-8");
+    res.writeHead(200, {
+      "Content-Type": "application/x-yaml",
+      "Access-Control-Allow-Origin": "*",
+    });
+    res.end(yaml);
+    return;
+  }
+  sendJson(res, 200, JSON.parse(_openApiJson));
+}
+
 // ── Server ───────────────────────────────────────────────────────────────────
 
 export interface ServeOptions {
@@ -240,6 +274,8 @@ export async function startApiServer(
         await handleExtract(req, res);
       } else if (url.pathname === "/api/health" && req.method === "GET") {
         handleHealth(req, res);
+      } else if (url.pathname === "/api/openapi.yaml" && req.method === "GET") {
+        handleOpenApi(req, res);
       } else {
         sendJson(res, 404, { error: "Not found" });
       }
@@ -253,8 +289,9 @@ export async function startApiServer(
     server.listen(port, host, () => {
       console.log(`\nMyelin NER API listening on http://${host}:${port}`);
       console.log("Endpoints:");
-      console.log("  POST /api/extract  — Extract entities from text");
-      console.log("  GET  /api/health   — Check server status");
+      console.log("  POST /api/extract       — Extract entities from text");
+      console.log("  GET  /api/health        — Check server status");
+      console.log("  GET  /api/openapi.yaml  — OpenAPI 3.1 spec");
       console.log("\nExample:");
       console.log(
         `  curl -X POST http://${host}:${port}/api/extract \\`,
