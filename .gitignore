@@ -3,3 +3,9 @@ dist/
 *.js.map
 .env
 *.onnx
+
+# Database files (contain user-specific knowledge graph data)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
