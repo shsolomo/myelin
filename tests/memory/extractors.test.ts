@@ -68,7 +68,7 @@ describe('nameToId', () => {
 describe('isLikelyPerson', () => {
   it('returns true for typical person names', () => {
     expect(isLikelyPerson('John Smith')).toBe(true);
-    expect(isLikelyPerson('Ian Philpot')).toBe(true);
+    expect(isLikelyPerson('Jane Thompson')).toBe(true);
   });
 
   it('returns false for known non-person names', () => {

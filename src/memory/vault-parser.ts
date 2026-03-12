@@ -43,7 +43,7 @@ function isoNow(): string {
   return new Date().toISOString();
 }
 
-/** Title-case a kebab/snake string: "josh-lane" → "Josh Lane" */
+/** Title-case a kebab/snake string: "some-name" → "Some Name" */
 function titleCase(s: string): string {
   return s.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }

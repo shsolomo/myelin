@@ -106,15 +106,15 @@ describe('nremReplay', () => {
 
   it('processes LLM extractions into graph', async () => {
     // nremReplay needs entries to not exit early — provide a log file
-    const logPath = createTempLog(`## 2025-12-01\n\n### Meeting notes\nDiscussed auth service with Josh Lane.\n`);
+    const logPath = createTempLog(`## 2025-12-01\n\n### Meeting notes\nDiscussed auth service with Alex Chen.\n`);
 
     const extraction = JSON.stringify({
       entities: [
         { id: 'auth-service', type: 'tool', name: 'Auth Service', description: 'Handles JWT auth', salience: 0.8 },
-        { id: 'josh', type: 'person', name: 'Josh Lane', description: 'Team lead', salience: 0.6 },
+        { id: 'alex', type: 'person', name: 'Alex Chen', description: 'Team lead', salience: 0.6 },
       ],
       relationships: [
-        { source: 'josh', target: 'auth-service', relationship: 'authored_by', description: 'Josh built it' },
+        { source: 'alex', target: 'auth-service', relationship: 'authored_by', description: 'Alex built it' },
       ],
     });
 
@@ -127,7 +127,7 @@ describe('nremReplay', () => {
     expect(result.nodesAdded).toBe(2);
     expect(result.edgesAdded).toBe(1);
     expect(graph.getNode('auth-service')).not.toBeNull();
-    expect(graph.getNode('josh')).not.toBeNull();
+    expect(graph.getNode('alex')).not.toBeNull();
   });
 
   it('reinforces existing nodes on re-extraction', async () => {
