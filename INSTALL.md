@@ -144,7 +144,45 @@ Ensure C++ build tools and Python are installed. On Windows, run `npm install --
 The extension's native modules must match the Copilot CLI's Node.js version. Re-run `myelin setup-extension` to recompile.
 
 ### GLiNER model not found
-The ONNX model files should be in `models/gliner/` relative to the myelin install. Run `npm install -g github:shsolomo/myelin` to reinstall with model files included.
+The ONNX model (~583MB) is not included in the npm package — it must be exported locally on each machine:
+
+```bash
+pip install gliner onnx onnxruntime
+python scripts/export-gliner.py
+```
+
+If you installed globally, copy the exported model to the global install location:
+
+```bash
+# macOS/Linux
+cp -r ./models/gliner $(npm root -g)/myelin/models/
+
+# Windows (PowerShell)
+Copy-Item -Recurse .\models\gliner (Join-Path (npm root -g) myelin\models\)
+```
+
+As a workaround, use `--fast` to skip NER entirely (proximity-only edges):
+
+```bash
+myelin ingest ./path/to/notes --fast
+myelin consolidate --agent myagent --fast
+```
+
+### Node.js 24: tree-sitter C++20 build failure
+Node.js 24's V8 headers require C++20, but tree-sitter@0.25.0 forces C++17. Myelin includes a postinstall script that patches this automatically. If you still see `C++20 or later required` errors, run:
+
+```bash
+npm rebuild
+```
+
+### Node.js 24 + Visual Studio 2026: node-gyp not recognized
+node-gyp does not yet recognize VS 2026 (internal version 18.x). Workaround: set the VS version manually:
+
+```powershell
+npm config set msvs_version 2022
+```
+
+Or if only VS 2026 is installed, patch node-gyp as described in [#7](https://github.com/shsolomo/myelin/issues/7).
 
 ### Embedding model slow on first run
 The first call to `myelin embed` or `myelin ingest` downloads the all-MiniLM-L6-v2 model (~80MB). Subsequent runs use the cached model.

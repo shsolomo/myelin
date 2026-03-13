@@ -32,6 +32,7 @@
     "test:watch": "vitest",
     "lint": "eslint src/",
     "clean": "rimraf dist",
+    "postinstall": "node scripts/postinstall.mjs",
     "prepublishOnly": "npm run build && npm run bundle-extension"
   },
   "keywords": [
@@ -73,5 +74,8 @@
     "rimraf": "^6.0.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
+  },
+  "overrides": {
+    "onnxruntime-web": "npm:onnxruntime-node@>=1.21.0"
   }
 }
