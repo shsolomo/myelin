@@ -14,6 +14,37 @@ npm install -g github:shsolomo/myelin
 
 Compiles native dependencies (better-sqlite3, sqlite-vec, tree-sitter grammars). Requires Node.js >= 20 and C++ build tools.
 
+### Windows: Recommended Install (clone + link)
+
+On Windows, the global npm install (`npm install -g github:shsolomo/myelin`) can hit race conditions with Node 24. **The recommended approach for Windows is to clone and link locally:**
+
+```powershell
+# 1. Clone the repo
+git clone https://github.com/shsolomo/myelin.git
+cd myelin
+
+# 2. Install dependencies (--legacy-peer-deps resolves tree-sitter version conflicts)
+npm install --legacy-peer-deps
+
+# 3. Build
+npm run build
+
+# 4. Link globally (makes 'myelin' available as a command)
+npm link
+```
+
+This separates the install/build/link phases and avoids the global-install race conditions entirely.
+
+**Why not `npm install -g`?** Three compounding issues on Windows + Node 24:
+1. **ENOTEMPTY**  npm's `.staging/` directory has rename race conditions during git dependency preparation
+2. **ENOENT cmd.exe**  native build scripts (better-sqlite3, tree-sitter) can fail to spawn `cmd.exe` when installed from PowerShell. If you must use global install, run from `cmd.exe` instead of PowerShell.
+3. **Peer dep conflict**  `tree-sitter-bicep` wants `tree-sitter ^0.22.1` but root has `^0.25.0`. Use `--legacy-peer-deps`.
+
+See [#9](https://github.com/shsolomo/myelin/issues/9) for full details.
+
+After linking, continue with steps 2 and 3 from Quick Start above (`myelin init` and `myelin setup-extension`).
+
+
 ### 2. Initialize the graph
 
 ```bash
@@ -186,3 +217,4 @@ Or if only VS 2026 is installed, patch node-gyp as described in [#7](https://git
 
 ### Embedding model slow on first run
 The first call to `myelin embed` or `myelin ingest` downloads the all-MiniLM-L6-v2 model (~80MB). Subsequent runs use the cached model.
+
