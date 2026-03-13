@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { initSchema, extendSchemaForCode, SCHEMA_SQL, CODE_SCHEMA_EXTENSIONS } from '../../src/memory/schema.js';
+import { initSchema, extendSchemaForCode, extendSchemaForClassification, SCHEMA_SQL, CODE_SCHEMA_EXTENSIONS } from '../../src/memory/schema.js';
 
 let db: Database.Database;
 
@@ -140,6 +140,77 @@ describe('extendSchemaForCode', () => {
     expect(names).toContain('idx_nodes_category');
     expect(names).toContain('idx_nodes_file_path');
     expect(names).toContain('idx_nodes_namespace');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extendSchemaForClassification
+// ---------------------------------------------------------------------------
+
+describe('extendSchemaForClassification', () => {
+  beforeEach(() => {
+    initSchema(db);
+  });
+
+  it('adds sensitivity columns to nodes', () => {
+    extendSchemaForClassification(db);
+    const info = db.pragma('table_info(nodes)') as Array<{ name: string }>;
+    const columns = info.map(r => r.name);
+    expect(columns).toContain('sensitivity');
+    expect(columns).toContain('sensitivity_reason');
+  });
+
+  it('adds sensitivity columns to edges', () => {
+    extendSchemaForClassification(db);
+    const info = db.pragma('table_info(edges)') as Array<{ name: string }>;
+    const columns = info.map(r => r.name);
+    expect(columns).toContain('sensitivity');
+    expect(columns).toContain('sensitivity_reason');
+  });
+
+  it('sensitivity defaults to 0 on nodes', () => {
+    extendSchemaForClassification(db);
+    db.exec(`INSERT INTO nodes (id, type, name, created_at, last_reinforced)
+             VALUES ('test', 'concept', 'Test', '2026-01-01', '2026-01-01')`);
+    const row = db.prepare('SELECT sensitivity FROM nodes WHERE id = ?').get('test') as { sensitivity: number };
+    expect(row.sensitivity).toBe(0);
+  });
+
+  it('sensitivity defaults to 0 on edges', () => {
+    extendSchemaForClassification(db);
+    db.exec(`INSERT INTO nodes (id, type, name, created_at, last_reinforced)
+             VALUES ('a', 'concept', 'A', '2026-01-01', '2026-01-01')`);
+    db.exec(`INSERT INTO nodes (id, type, name, created_at, last_reinforced)
+             VALUES ('b', 'concept', 'B', '2026-01-01', '2026-01-01')`);
+    db.exec(`INSERT INTO edges (source_id, target_id, relationship, created_at, last_reinforced)
+             VALUES ('a', 'b', 'relates_to', '2026-01-01', '2026-01-01')`);
+    const row = db.prepare('SELECT sensitivity FROM edges WHERE source_id = ?').get('a') as { sensitivity: number };
+    expect(row.sensitivity).toBe(0);
+  });
+
+  it('is idempotent — running twice does not throw', () => {
+    extendSchemaForClassification(db);
+    expect(() => extendSchemaForClassification(db)).not.toThrow();
+  });
+
+  it('creates classification indexes', () => {
+    extendSchemaForClassification(db);
+    const indexes = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%sensitivity%'"
+    ).all() as Array<{ name: string }>;
+    const names = indexes.map(i => i.name);
+    expect(names).toContain('idx_nodes_sensitivity');
+    expect(names).toContain('idx_edges_sensitivity');
+  });
+
+  it('works alongside extendSchemaForCode', () => {
+    extendSchemaForCode(db);
+    extendSchemaForClassification(db);
+    const nodeInfo = db.pragma('table_info(nodes)') as Array<{ name: string }>;
+    const columns = nodeInfo.map(r => r.name);
+    expect(columns).toContain('category');
+    expect(columns).toContain('sensitivity');
+    expect(columns).toContain('sensitivity_reason');
   });
 });
 

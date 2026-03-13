@@ -8,7 +8,7 @@
  */
 
 import Database from 'better-sqlite3';
-import { initSchema, extendSchemaForCode } from './schema.js';
+import { initSchema, extendSchemaForCode, extendSchemaForClassification } from './schema.js';
 
 // ── Enums ────────────────────────────────────────────────────────────────────
 
@@ -57,6 +57,9 @@ export interface Node {
   lineStart?: number;
   lineEnd?: number;
   namespace?: string;
+  // Classification fields (added via ALTER TABLE)
+  sensitivity?: number;
+  sensitivityReason?: string;
 }
 
 export interface Edge {
@@ -143,6 +146,8 @@ interface NodeRow {
   file_path?: string;
   line_start?: number;
   line_end?: number;
+  sensitivity?: number;
+  sensitivity_reason?: string;
 }
 
 interface EdgeRow {
@@ -177,6 +182,11 @@ export class KnowledgeGraph {
   /** Extend core schema with code-graph columns (idempotent). */
   extendForCode(): void {
     extendSchemaForCode(this.db);
+  }
+
+  /** Extend core schema with classification columns (idempotent). */
+  extendForClassification(): void {
+    extendSchemaForClassification(this.db);
   }
 
   private initVecExtension(): void {
@@ -233,6 +243,8 @@ export class KnowledgeGraph {
       lineStart: node.lineStart,
       lineEnd: node.lineEnd,
       namespace: node.namespace,
+      sensitivity: node.sensitivity,
+      sensitivityReason: node.sensitivityReason,
     };
 
     this.db
@@ -254,12 +266,14 @@ export class KnowledgeGraph {
       );
 
     // Set extended columns if they exist (added via ALTER TABLE)
-    if (full.category || full.namespace) {
+    if (full.category || full.namespace || full.sensitivity !== undefined || full.sensitivityReason) {
       try {
         const sets: string[] = [];
         const vals: unknown[] = [];
         if (full.category) { sets.push('category = ?'); vals.push(full.category); }
         if (full.namespace) { sets.push('namespace = ?'); vals.push(full.namespace); }
+        if (full.sensitivity !== undefined) { sets.push('sensitivity = ?'); vals.push(full.sensitivity); }
+        if (full.sensitivityReason) { sets.push('sensitivity_reason = ?'); vals.push(full.sensitivityReason); }
         if (sets.length > 0) {
           vals.push(full.id);
           this.db.prepare(`UPDATE nodes SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
@@ -379,6 +393,8 @@ export class KnowledgeGraph {
         | 'confidence'
         | 'sourceAgent'
         | 'lastReinforced'
+        | 'sensitivity'
+        | 'sensitivityReason'
       >
     >,
   ): boolean {
@@ -389,6 +405,8 @@ export class KnowledgeGraph {
       confidence: 'confidence',
       sourceAgent: 'source_agent',
       lastReinforced: 'last_reinforced',
+      sensitivity: 'sensitivity',
+      sensitivityReason: 'sensitivity_reason',
     };
 
     const sets: string[] = [];
@@ -855,6 +873,8 @@ export class KnowledgeGraph {
       lineStart: row.line_start ?? undefined,
       lineEnd: row.line_end ?? undefined,
       namespace: (row as any).namespace ?? undefined,
+      sensitivity: row.sensitivity ?? undefined,
+      sensitivityReason: row.sensitivity_reason ?? undefined,
     };
   }
 

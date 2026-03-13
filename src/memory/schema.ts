@@ -110,6 +110,27 @@ export const CODE_SCHEMA_EXTENSIONS: string[] = CODE_COLUMNS.map(
   ([name, typedef]) => `ALTER TABLE nodes ADD COLUMN ${name} ${typedef}`,
 );
 
+// ── Classification extension ─────────────────────────────────────────────────
+
+const CLASSIFICATION_COLUMNS: {
+  nodes: Array<[string, string]>;
+  edges: Array<[string, string]>;
+} = {
+  nodes: [
+    ['sensitivity', 'INTEGER DEFAULT 0'],
+    ['sensitivity_reason', 'TEXT'],
+  ],
+  edges: [
+    ['sensitivity', 'INTEGER DEFAULT 0'],
+    ['sensitivity_reason', 'TEXT'],
+  ],
+};
+
+const CLASSIFICATION_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_nodes_sensitivity ON nodes(sensitivity)',
+  'CREATE INDEX IF NOT EXISTS idx_edges_sensitivity ON edges(sensitivity)',
+];
+
 // ── Init helpers ─────────────────────────────────────────────────────────────
 
 /** Run core DDL (tables, FTS, triggers, indexes). */
@@ -135,6 +156,40 @@ export function extendSchemaForCode(db: Database.Database): void {
   }
 
   for (const idx of CODE_INDEXES) {
+    db.exec(idx);
+  }
+}
+
+/**
+ * Idempotently add classification columns (sensitivity, sensitivity_reason)
+ * to both nodes and edges tables, plus indexes.
+ * Safe to call multiple times — skips columns that already exist.
+ */
+export function extendSchemaForClassification(db: Database.Database): void {
+  const existingNodes = new Set(
+    (db.pragma('table_info(nodes)') as Array<{ name: string }>).map(
+      (r) => r.name,
+    ),
+  );
+  const existingEdges = new Set(
+    (db.pragma('table_info(edges)') as Array<{ name: string }>).map(
+      (r) => r.name,
+    ),
+  );
+
+  for (const [colName, colDef] of CLASSIFICATION_COLUMNS.nodes) {
+    if (!existingNodes.has(colName)) {
+      db.exec(`ALTER TABLE nodes ADD COLUMN ${colName} ${colDef}`);
+    }
+  }
+
+  for (const [colName, colDef] of CLASSIFICATION_COLUMNS.edges) {
+    if (!existingEdges.has(colName)) {
+      db.exec(`ALTER TABLE edges ADD COLUMN ${colName} ${colDef}`);
+    }
+  }
+
+  for (const idx of CLASSIFICATION_INDEXES) {
     db.exec(idx);
   }
 }
