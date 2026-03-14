@@ -1381,6 +1381,24 @@ program
       console.error(chalk.yellow('Warning: Some native deps may have failed. Extension will work with reduced features.'));
     }
 
+    // Step 6: Download models
+    console.log(chalk.cyan('Downloading models (one-time setup)...'));
+    try {
+      const { ensureGlinerModel } = await import('./memory/ner.js');
+      const result = await ensureGlinerModel();
+      if (result) console.log(chalk.green('   GLiNER NER model downloaded'));
+      else console.log(chalk.yellow('   GLiNER download failed — NER will use regex fallback'));
+    } catch {
+      console.log(chalk.yellow('   GLiNER download failed — NER will use regex fallback'));
+    }
+    try {
+      const { getEmbedding } = await import('./memory/embeddings.js');
+      await getEmbedding('warmup');
+      console.log(chalk.green('   Embedding model downloaded'));
+    } catch {
+      console.log(chalk.yellow('   Embedding download failed — will retry on first use'));
+    }
+
     console.log('');
     console.log(chalk.green('✅ Myelin extension installed at: ') + extTarget);
     console.log(chalk.gray('   Restart Copilot CLI or run /clear to load the extension.'));
@@ -1475,14 +1493,17 @@ program
     }
 
     // 6. GLiNER model
-    const modelDir = join(homedir(), '.copilot', '.working-memory', 'models', 'gliner');
+    const modelDir = join(homedir(), '.cache', 'myelin', 'models', 'gliner');
+    const modelDirOld = join(homedir(), '.copilot', '.working-memory', 'models', 'gliner');
     const modelDirAlt = join(homedir(), '.cache', 'huggingface');
     if (existsSync(modelDir)) {
       pass(`GLiNER model directory found: ${modelDir}`);
+    } else if (existsSync(modelDirOld)) {
+      pass(`GLiNER model found (legacy location): ${modelDirOld}`);
     } else if (existsSync(modelDirAlt)) {
       pass(`HuggingFace cache found: ${modelDirAlt}`);
     } else {
-      warn('GLiNER model not found — NER will use regex fallback');
+      warn("GLiNER model not found — run 'myelin setup-extension' to download, or NER will use regex fallback");
     }
 
     // 7. sqlite-vec

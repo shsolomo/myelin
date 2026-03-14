@@ -38,6 +38,7 @@ This single command:
 - Initializes the graph database (`~/.copilot/.working-memory/graph.db`) if it doesn't exist
 - Bundles the extension into `~/.copilot/extensions/myelin/extension.mjs`
 - Installs native dependencies for the extension runtime
+- Downloads the GLiNER NER model and embedding model (~660MB one-time download)
 
 ### 3. Restart Copilot CLI
 
@@ -151,23 +152,9 @@ Optional configuration for power users who want more control.
 
 ### GLiNER for high-precision NER
 
-By default, entity extraction uses a regex/heuristic fallback. For significantly better NER accuracy, install the GLiNER ONNX model:
+By default, entity extraction uses a regex/heuristic fallback. For significantly better NER accuracy, GLiNER provides zero-shot named entity recognition using a DeBERTa v2 backbone with ONNX inference — no Python dependency at runtime.
 
-```bash
-# Requires Python with pip
-pip install gliner onnx onnxruntime
-python scripts/export-gliner.py
-```
-
-This exports the model (~583MB) to `./models/gliner/`. If you installed myelin globally, copy it:
-
-```bash
-# macOS/Linux
-cp -r ./models/gliner $(npm root -g)/myelin/models/
-
-# Windows (PowerShell)
-Copy-Item -Recurse .\models\gliner (Join-Path (npm root -g) myelin\models\)
-```
+GLiNER is downloaded automatically during `myelin setup-extension`. No manual steps needed. The model (~583MB) is cached at `~/.cache/myelin/models/gliner/` and will also auto-download on first NER use if not already present.
 
 ### IDEA vault indexing
 

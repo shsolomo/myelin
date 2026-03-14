@@ -12,9 +12,9 @@
  * should fall back to the regex path.
  */
 
-import { readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { NER_LABELS } from "./vocabulary.js";
 
 /** A single entity extracted by NER. */
@@ -33,6 +33,11 @@ export interface NEREntity {
 const MAX_WIDTH = 12;
 const WORD_REGEX = /\w+(?:[-_]\w+)*|\S/g;
 
+const GLINER_MODEL_ID = 'shsolomo/gliner-small-v2.1-onnx';
+const GLINER_CACHE_DIR = join(homedir(), '.cache', 'myelin', 'models', 'gliner');
+const HF_BASE_URL = 'https://huggingface.co/' + GLINER_MODEL_ID + '/resolve/main';
+const MODEL_FILES = ['model.onnx', 'tokenizer.json', 'gliner_config.json', 'tokenizer_config.json'];
+
 // ---------------------------------------------------------------------------
 // Module-level cache (lazy-loaded)
 // ---------------------------------------------------------------------------
@@ -49,23 +54,39 @@ interface GlinerSession {
 let _gliner: GlinerSession | null = null;
 let _loadFailed = false;
 
-/** Resolve the models/gliner directory relative to this source file. */
-function getModelDir(): string {
-  // Works for both src/ (dev) and dist/ (built) layouts
-  const thisFile = fileURLToPath(import.meta.url);
-  const srcOrDist = dirname(dirname(thisFile)); // up from memory/ to src/ or dist/
-  const repoRoot = dirname(srcOrDist);          // up to repo root
-  return join(repoRoot, "models", "gliner");
+/**
+ * Ensure the GLiNER ONNX model files are downloaded from HuggingFace.
+ * Downloads to ~/.cache/myelin/models/gliner/ on first run.
+ * Returns the model directory path, or null if download fails.
+ */
+export async function ensureGlinerModel(): Promise<string | null> {
+  const modelPath = join(GLINER_CACHE_DIR, 'model.onnx');
+  if (existsSync(modelPath)) return GLINER_CACHE_DIR;
+
+  try {
+    mkdirSync(GLINER_CACHE_DIR, { recursive: true });
+    for (const file of MODEL_FILES) {
+      const url = HF_BASE_URL + '/' + file;
+      const destPath = join(GLINER_CACHE_DIR, file);
+      if (existsSync(destPath)) continue;
+
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Failed to download ' + file + ': ' + response.status);
+      const buffer = Buffer.from(await response.arrayBuffer());
+      writeFileSync(destPath, buffer);
+    }
+    return GLINER_CACHE_DIR;
+  } catch {
+    return null;
+  }
 }
 
 async function loadGliner(): Promise<GlinerSession | null> {
   if (_gliner !== null) return _gliner;
   if (_loadFailed) return null;
 
-  const modelDir = getModelDir();
-  const modelPath = join(modelDir, "model.onnx");
-
-  if (!existsSync(modelPath)) {
+  const modelDir = await ensureGlinerModel();
+  if (modelDir === null) {
     _loadFailed = true;
     return null;
   }
@@ -74,7 +95,7 @@ async function loadGliner(): Promise<GlinerSession | null> {
     const ort = await import("onnxruntime-node");
     const { AutoTokenizer } = await import("@huggingface/transformers");
 
-    const session = await ort.InferenceSession.create(modelPath, {
+    const session = await ort.InferenceSession.create(join(modelDir, "model.onnx"), {
       executionProviders: ["cpu"],
     });
 
