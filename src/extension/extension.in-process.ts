@@ -111,7 +111,7 @@ const session = await joinSession({
           try {
             const queryEmbedding = await getEmbedding(input.prompt);
             if (queryEmbedding.length > 0) {
-              const results = graph.semanticSearch(queryEmbedding, 5, "knowledge");
+              const results = graph.semanticSearch(queryEmbedding, 5, "knowledge", undefined, 2);
               const relevant = results.filter((r: any) => r.distance < 1.2);
               if (relevant.length > 0) {
                 context = relevant
@@ -128,7 +128,9 @@ const session = await joinSession({
             const keywords = extractKeywords(input.prompt);
             if (keywords.length > 0) {
               const ftsQuery = keywords.join(" OR ");
-              const nodes = graph.searchNodes(ftsQuery, 5);
+              const nodes = graph.searchNodes(ftsQuery, 10)
+                .filter((n: any) => (n.sensitivity ?? 0) <= 2)
+                .slice(0, 5);
               if (nodes.length > 0) {
                 searchMethod = "keyword";
                 context = nodes
