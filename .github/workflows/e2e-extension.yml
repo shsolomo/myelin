@@ -1,0 +1,35 @@
+name: Extension UAT
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  extension-uat:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: [20, 22]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - run: npm ci --legacy-peer-deps
+
+      - run: npm run build
+
+      - run: npm run bundle-extension
+
+      - name: Verify bundle exists
+        run: node -e "const fs = require('fs'); const s = fs.statSync('dist/extension/extension.mjs'); console.log('Bundle size:', s.size, 'bytes')"
+
+      - name: Run extension tests
+        run: npx vitest run tests/extension/
