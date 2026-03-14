@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS nodes (
     confidence REAL DEFAULT 1.0,
     source_agent TEXT DEFAULT '',
     created_at TEXT NOT NULL,
-    last_reinforced TEXT NOT NULL
+    last_reinforced TEXT NOT NULL,
+    pinned INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS edges (
@@ -82,6 +83,7 @@ CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id);
 CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id);
 CREATE INDEX IF NOT EXISTS idx_edges_relationship ON edges(relationship);
 CREATE INDEX IF NOT EXISTS idx_node_tags_tag ON node_tags(tag);
+CREATE INDEX IF NOT EXISTS idx_nodes_pinned ON nodes(pinned) WHERE pinned = 1;
 `;
 
 // ── Code-graph extension ─────────────────────────────────────────────────────
@@ -129,6 +131,16 @@ const CLASSIFICATION_COLUMNS: {
 const CLASSIFICATION_INDEXES = [
   'CREATE INDEX IF NOT EXISTS idx_nodes_sensitivity ON nodes(sensitivity)',
   'CREATE INDEX IF NOT EXISTS idx_edges_sensitivity ON edges(sensitivity)',
+];
+
+// ── Pinned-node extension ─────────────────────────────────────────────────
+
+const PINNED_COLUMNS: Array<[string, string]> = [
+  ['pinned', 'INTEGER DEFAULT 0'],
+];
+
+const PINNED_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_nodes_pinned ON nodes(pinned) WHERE pinned = 1',
 ];
 
 // ── Init helpers ─────────────────────────────────────────────────────────────
@@ -190,6 +202,28 @@ export function extendSchemaForClassification(db: Database.Database): void {
   }
 
   for (const idx of CLASSIFICATION_INDEXES) {
+    db.exec(idx);
+  }
+}
+
+/**
+ * Idempotently add pinned column to the nodes table.
+ * Safe to call multiple times — skips if column already exists.
+ */
+export function extendSchemaForPinned(db: Database.Database): void {
+  const existing = new Set(
+    (db.pragma('table_info(nodes)') as Array<{ name: string }>).map(
+      (r) => r.name,
+    ),
+  );
+
+  for (const [colName, colDef] of PINNED_COLUMNS) {
+    if (!existing.has(colName)) {
+      db.exec(`ALTER TABLE nodes ADD COLUMN ${colName} ${colDef}`);
+    }
+  }
+
+  for (const idx of PINNED_INDEXES) {
     db.exec(idx);
   }
 }

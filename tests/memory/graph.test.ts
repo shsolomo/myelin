@@ -835,3 +835,92 @@ describe('lifecycle', () => {
     expect(() => g.close()).not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Pinned nodes
+// ---------------------------------------------------------------------------
+
+describe('pinned nodes', () => {
+  it('addNode with pinned: true creates a pinned node', () => {
+    const node = graph.addNode({ id: 'pinned1', name: 'Pinned Rule', pinned: true });
+    expect(node.pinned).toBe(true);
+    const fetched = graph.getNode('pinned1');
+    expect(fetched).not.toBeNull();
+    expect(fetched!.pinned).toBe(true);
+  });
+
+  it('addNode without pinned defaults to not pinned', () => {
+    const node = graph.addNode({ id: 'normal1', name: 'Normal Node' });
+    expect(node.pinned).toBeFalsy();
+    const fetched = graph.getNode('normal1');
+    expect(fetched).not.toBeNull();
+    expect(fetched!.pinned).toBeFalsy();
+  });
+
+  it('findNodes with pinned: true returns only pinned nodes', () => {
+    graph.addNode({ id: 'p1', name: 'Pinned A', pinned: true });
+    graph.addNode({ id: 'u1', name: 'Unpinned A' });
+    graph.addNode({ id: 'u2', name: 'Unpinned B' });
+
+    const pinnedOnly = graph.findNodes({ pinned: true });
+    expect(pinnedOnly).toHaveLength(1);
+    expect(pinnedOnly[0].id).toBe('p1');
+  });
+
+  it('findNodes with pinned: false excludes pinned nodes', () => {
+    graph.addNode({ id: 'p1', name: 'Pinned A', pinned: true });
+    graph.addNode({ id: 'u1', name: 'Unpinned A' });
+    graph.addNode({ id: 'u2', name: 'Unpinned B' });
+
+    const unpinnedOnly = graph.findNodes({ pinned: false });
+    expect(unpinnedOnly).toHaveLength(2);
+    expect(unpinnedOnly.every((n) => n.id !== 'p1')).toBe(true);
+  });
+
+  it('updateNode can pin and unpin a node', () => {
+    graph.addNode({ id: 'toggle1', name: 'Toggle Node' });
+
+    // Pin
+    graph.updateNode('toggle1', { pinned: true });
+    let fetched = graph.getNode('toggle1');
+    expect(fetched!.pinned).toBe(true);
+
+    // Unpin
+    graph.updateNode('toggle1', { pinned: false });
+    fetched = graph.getNode('toggle1');
+    expect(fetched!.pinned).toBeFalsy();
+  });
+
+  it('decayAll skips pinned nodes', () => {
+    const old = new Date(Date.now() - 14 * 86_400_000).toISOString();
+    graph.addNode({ id: 'pinned-decay', name: 'Pinned Decay', salience: 0.8, pinned: true, lastReinforced: old });
+    graph.addNode({ id: 'normal-decay', name: 'Normal Decay', salience: 0.8, lastReinforced: old });
+
+    graph.decayAll(0.1);
+
+    const pinned = graph.getNode('pinned-decay')!;
+    const normal = graph.getNode('normal-decay')!;
+    expect(pinned.salience).toBe(0.8); // unchanged
+    expect(normal.salience).toBeLessThan(0.8); // decayed
+  });
+
+  it('prune skips pinned nodes', () => {
+    const old = new Date(Date.now() - 60 * 86_400_000).toISOString();
+    graph.addNode({ id: 'pinned-prune', name: 'Pinned Prune', salience: 0.01, pinned: true, lastReinforced: old });
+
+    const count = graph.prune(0.05, 30);
+    expect(count).toBe(0);
+    expect(graph.getNode('pinned-prune')).not.toBeNull();
+  });
+
+  it('prune removes unpinned nodes but keeps pinned', () => {
+    const old = new Date(Date.now() - 60 * 86_400_000).toISOString();
+    graph.addNode({ id: 'pinned-keep', name: 'Pinned Keep', salience: 0.01, pinned: true, lastReinforced: old });
+    graph.addNode({ id: 'unpinned-gone', name: 'Unpinned Gone', salience: 0.01, lastReinforced: old });
+
+    const count = graph.prune(0.05, 30);
+    expect(count).toBe(1);
+    expect(graph.getNode('pinned-keep')).not.toBeNull();
+    expect(graph.getNode('unpinned-gone')).toBeNull();
+  });
+});

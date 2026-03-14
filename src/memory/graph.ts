@@ -8,7 +8,7 @@
  */
 
 import Database from 'better-sqlite3';
-import { initSchema, extendSchemaForCode, extendSchemaForClassification } from './schema.js';
+import { initSchema, extendSchemaForCode, extendSchemaForClassification, extendSchemaForPinned } from './schema.js';
 
 // ── Enums ────────────────────────────────────────────────────────────────────
 
@@ -60,6 +60,8 @@ export interface Node {
   // Classification fields (added via ALTER TABLE)
   sensitivity?: number;
   sensitivityReason?: string;
+  // Pinned field (added via ALTER TABLE)
+  pinned?: boolean;
 }
 
 export interface Edge {
@@ -82,6 +84,7 @@ export interface FindNodesFilters {
   namespace?: string;
   category?: string;
   ceiling?: number;
+  pinned?: boolean;
 }
 
 export interface SubgraphFilters {
@@ -151,6 +154,7 @@ interface NodeRow {
   line_end?: number;
   sensitivity?: number;
   sensitivity_reason?: string;
+  pinned?: number;
 }
 
 interface EdgeRow {
@@ -179,6 +183,7 @@ export class KnowledgeGraph {
     initSchema(this.db);
     extendSchemaForCode(this.db);
     extendSchemaForClassification(this.db);
+    extendSchemaForPinned(this.db);
     this.initVecExtension();
   }
 
@@ -250,6 +255,7 @@ export class KnowledgeGraph {
       namespace: node.namespace,
       sensitivity: node.sensitivity,
       sensitivityReason: node.sensitivityReason,
+      pinned: node.pinned,
     };
 
     this.db
@@ -271,7 +277,7 @@ export class KnowledgeGraph {
       );
 
     // Set extended columns if they exist (added via ALTER TABLE)
-    if (full.category || full.namespace || full.sensitivity !== undefined || full.sensitivityReason) {
+    if (full.category || full.namespace || full.sensitivity !== undefined || full.sensitivityReason || full.pinned) {
       try {
         const sets: string[] = [];
         const vals: unknown[] = [];
@@ -279,6 +285,7 @@ export class KnowledgeGraph {
         if (full.namespace) { sets.push('namespace = ?'); vals.push(full.namespace); }
         if (full.sensitivity !== undefined) { sets.push('sensitivity = ?'); vals.push(full.sensitivity); }
         if (full.sensitivityReason) { sets.push('sensitivity_reason = ?'); vals.push(full.sensitivityReason); }
+        if (full.pinned) { sets.push('pinned = ?'); vals.push(1); }
         if (sets.length > 0) {
           vals.push(full.id);
           this.db.prepare(`UPDATE nodes SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
@@ -316,6 +323,7 @@ export class KnowledgeGraph {
       namespace,
       category,
       ceiling,
+      pinned,
     } = filters;
 
     let query = 'SELECT DISTINCT n.* FROM nodes n';
@@ -351,6 +359,12 @@ export class KnowledgeGraph {
     if (ceiling !== undefined) {
       conditions.push('(n.sensitivity IS NULL OR n.sensitivity <= ?)');
       params.push(ceiling);
+    }
+
+    if (pinned === true) {
+      conditions.push('n.pinned = 1');
+    } else if (pinned === false) {
+      conditions.push('(n.pinned = 0 OR n.pinned IS NULL)');
     }
 
     query += ' WHERE ' + conditions.join(' AND ');
@@ -406,6 +420,7 @@ export class KnowledgeGraph {
         | 'lastReinforced'
         | 'sensitivity'
         | 'sensitivityReason'
+        | 'pinned'
       >
     >,
   ): boolean {
@@ -418,6 +433,7 @@ export class KnowledgeGraph {
       lastReinforced: 'last_reinforced',
       sensitivity: 'sensitivity',
       sensitivityReason: 'sensitivity_reason',
+      pinned: 'pinned',
     };
 
     const sets: string[] = [];
@@ -427,7 +443,8 @@ export class KnowledgeGraph {
       const val = fields[jsKey as keyof typeof fields];
       if (val !== undefined) {
         sets.push(`${dbCol} = ?`);
-        vals.push(val);
+        // Convert boolean to integer for SQLite storage
+        vals.push(jsKey === 'pinned' ? (val ? 1 : 0) : val);
       }
     }
 
@@ -675,7 +692,7 @@ export class KnowledgeGraph {
 
     const rows = this.db
       .prepare(
-        'SELECT id, salience, last_reinforced FROM nodes WHERE salience > 0',
+        'SELECT id, salience, last_reinforced FROM nodes WHERE salience > 0 AND (pinned = 0 OR pinned IS NULL)',
       )
       .all() as Array<{
       id: string;
@@ -711,7 +728,7 @@ export class KnowledgeGraph {
 
     const result = this.db
       .prepare(
-        'DELETE FROM nodes WHERE salience < ? AND last_reinforced < ?',
+        'DELETE FROM nodes WHERE salience < ? AND last_reinforced < ? AND (pinned = 0 OR pinned IS NULL)',
       )
       .run(minSalience, cutoffIso);
     return result.changes;
@@ -914,6 +931,7 @@ export class KnowledgeGraph {
       namespace: (row as any).namespace ?? undefined,
       sensitivity: row.sensitivity ?? undefined,
       sensitivityReason: row.sensitivity_reason ?? undefined,
+      pinned: row.pinned === 1 ? true : undefined,
     };
   }
 

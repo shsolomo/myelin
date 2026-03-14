@@ -51,6 +51,10 @@ export function getBootContext(
 
   const graph = new KnowledgeGraph(dbPath);
   try {
+    // Always fetch pinned nodes — they load at every boot regardless of agent
+    const pinnedNodes = graph.findNodes({ pinned: true, limit: 100 });
+    const pinnedIds = new Set(pinnedNodes.map((n) => n.id));
+
     let allNodes: Node[];
 
     if (resolvedAgent) {
@@ -87,13 +91,22 @@ export function getBootContext(
       });
     }
 
+    // Merge pinned nodes into results (deduplicate by ID)
+    const seenIds = new Set(allNodes.map((n) => n.id));
+    for (const pn of pinnedNodes) {
+      if (!seenIds.has(pn.id)) {
+        seenIds.add(pn.id);
+        allNodes.push(pn);
+      }
+    }
+
     // Sort by salience descending, limit
     allNodes.sort((a, b) => b.salience - a.salience);
     const nodes = allNodes.slice(0, limit);
 
     const label = resolvedAgent ?? "generic";
 
-    if (nodes.length === 0) {
+    if (nodes.length === 0 && pinnedNodes.length === 0) {
       const stats = graph.stats();
       if (stats.nodeCount === 0) {
         return `# Graph Briefing — ${label}\n\nNo graph nodes found yet. The graph will populate as consolidation cycles run.\n`;
@@ -109,9 +122,29 @@ export function getBootContext(
       "",
     ];
 
-    // Group by type
+    // Pinned nodes section (always first if any exist)
+    const pinnedInResults = nodes.filter((n) => pinnedIds.has(n.id));
+    if (pinnedInResults.length > 0) {
+      lines.push("## 📌 Pinned");
+      for (const node of pinnedInResults) {
+        lines.push(
+          `- **${node.name}** (${node.salience.toFixed(2)}): ${node.description.slice(0, 120)}`,
+        );
+        const edges = graph.getEdges(node.id, "outgoing");
+        for (const edge of edges.slice(0, 3)) {
+          const target = graph.getNode(edge.targetId);
+          if (target) {
+            lines.push(`  → ${edge.relationship}: ${target.name}`);
+          }
+        }
+      }
+      lines.push("");
+    }
+
+    // Group by type (exclude pinned from type groups to avoid duplication)
     const byType = new Map<string, Node[]>();
     for (const node of nodes) {
+      if (pinnedIds.has(node.id)) continue; // already shown in Pinned section
       const list = byType.get(node.type) ?? [];
       list.push(node);
       byType.set(node.type, list);

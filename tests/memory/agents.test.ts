@@ -157,6 +157,26 @@ describe('getBootContext', () => {
     // Low Salience Node at 0.1 should be excluded
     expect(result).not.toContain('Low Salience Node');
   });
+
+  it('getBootContext includes pinned nodes', () => {
+    // Add a pinned node to the existing seeded DB
+    const graph = new KnowledgeGraph(dbPath);
+    graph.addNode({
+      id: 'pinned-rule',
+      name: 'Always Use Transactions',
+      type: NodeType.Rule,
+      description: 'All multi-step writes must use transactions',
+      salience: 0.4,
+      sourceAgent: 'hebb',
+      pinned: true,
+    });
+    graph.close();
+
+    // Even though salience is 0.4 and agent is 'hebb', pinned nodes should appear for cajal
+    const result = getBootContext('cajal', { dbPath });
+    expect(result).toContain('📌 Pinned');
+    expect(result).toContain('Always Use Transactions');
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -234,6 +234,7 @@ program
   .option('-f, --file <path>', 'Filter by file path (substring match)')
   .option('-a, --agent <name>', 'Filter by source agent')
   .option('--tag <tag>', 'Filter by domain tag')
+  .option('--pinned', 'Show only pinned nodes')
   .option('-s, --min-salience <n>', 'Minimum salience', '0')
   .option('-n, --limit <n>', 'Max results', '50')
   .option('--db <path>', 'Path to graph.db')
@@ -268,6 +269,9 @@ program
     if (opts.agent) {
       conditions.push('n.source_agent = ?');
       params.push(opts.agent);
+    }
+    if (opts.pinned) {
+      conditions.push('n.pinned = 1');
     }
     conditions.push('n.salience >= ?');
     params.push(parseFloat(opts.minSalience));
@@ -418,6 +422,7 @@ program
   .option('-s, --salience <n>', 'Salience score', '0.5')
   .option('-a, --agent <name>', 'Source agent', 'manual')
   .option('--sensitivity <n>', 'Sensitivity level (0=public, 1=internal, 2=confidential, 3=restricted)')
+  .option('--pinned', 'Pin this node (never decays)')
   .option('--tags <tags>', 'Comma-separated tags')
   .option('--db <path>', 'Path to graph.db')
   .action((opts) => {
@@ -430,8 +435,9 @@ program
       sourceAgent: opts.agent,
       tags: opts.tags ? opts.tags.split(',').map((t: string) => t.trim()) : [],
       sensitivity: opts.sensitivity !== undefined ? parseInt(opts.sensitivity) : undefined,
+      pinned: opts.pinned ? true : undefined,
     });
-    console.log(`Added node: ${node.id} (${node.type}: ${node.name})`);
+    console.log(`Added node: ${node.id} (${node.type}: ${node.name})${node.pinned ? ' 📌 pinned' : ''}`);
     graph.close();
     process.exit(0);
   });
@@ -480,6 +486,56 @@ program
       }
     } else {
       console.error(chalk.red('Failed to update node'));
+    }
+
+    graph.close();
+    process.exit(0);
+  });
+
+program
+  .command('pin')
+  .description('Pin a node (never decays, always loads at boot)')
+  .argument('<node-id>', 'Node ID to pin')
+  .option('--db <path>', 'Path to graph.db')
+  .action((nodeId: string, opts: { db?: string }) => {
+    const graph = openGraph(opts.db);
+    const existing = graph.getNode(nodeId);
+    if (!existing) {
+      console.error(chalk.red(`Node not found: ${nodeId}`));
+      graph.close();
+      process.exit(1);
+    }
+
+    const updated = graph.updateNode(nodeId, { pinned: true });
+    if (updated) {
+      console.log(`${chalk.green('📌')} Pinned: ${existing.name}`);
+    } else {
+      console.error(chalk.red('Failed to pin node'));
+    }
+
+    graph.close();
+    process.exit(0);
+  });
+
+program
+  .command('unpin')
+  .description('Unpin a node (resumes normal decay)')
+  .argument('<node-id>', 'Node ID to unpin')
+  .option('--db <path>', 'Path to graph.db')
+  .action((nodeId: string, opts: { db?: string }) => {
+    const graph = openGraph(opts.db);
+    const existing = graph.getNode(nodeId);
+    if (!existing) {
+      console.error(chalk.red(`Node not found: ${nodeId}`));
+      graph.close();
+      process.exit(1);
+    }
+
+    const updated = graph.updateNode(nodeId, { pinned: false });
+    if (updated) {
+      console.log(`${chalk.green('📌')} Unpinned: ${existing.name}`);
+    } else {
+      console.error(chalk.red('Failed to unpin node'));
     }
 
     graph.close();
