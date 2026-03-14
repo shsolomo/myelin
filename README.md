@@ -74,10 +74,10 @@ After setup, every Copilot CLI agent automatically gets:
 
 ```bash
 # Index a codebase
-myelin parse ./my-project
+myelin parse ./my-project --namespace repo:my-project --embed
 
 # Ingest text documents
-myelin ingest ./my-notes
+myelin ingest ./my-notes --namespace docs:notes --embed
 
 # Run a full maintenance cycle (consolidate + embed)
 myelin sleep
@@ -92,15 +92,17 @@ myelin doctor
 myelin viz
 ```
 
+Namespaces partition the graph by source, enabling filtered queries and future access controls. The `--embed` flag generates embeddings for semantic search (`myelin sleep` does this automatically).
+
 ## Three Pipelines
 
 ### `myelin parse` — Code Indexing
-Extracts structural entities from source code using **tree-sitter** AST parsing. Creates nodes for classes, methods, interfaces, functions, and edges for inheritance, containment, and imports.
+Extracts structural entities from source code using **tree-sitter** AST parsing. Creates nodes for classes, methods, interfaces, functions, and edges for inheritance, containment, and imports. Use `--namespace` to assign a namespace for graph partitioning (e.g., `--namespace repo:my-project`).
 
 **Languages:** C#, TypeScript/TSX, JavaScript, Python, Go, JSON, YAML, Dockerfile, PowerShell, Bicep
 
 ### `myelin ingest` — Document Ingestion
-General-purpose pipeline for any text file. Chunks documents, runs **GLiNER** zero-shot NER to extract entities, then uses **all-MiniLM-L6-v2** embeddings to classify relationships between entity pairs by comparing context against prototype sentences.
+General-purpose pipeline for any text file. Chunks documents, runs **GLiNER** zero-shot NER to extract entities, then uses **all-MiniLM-L6-v2** embeddings to classify relationships between entity pairs by comparing context against prototype sentences. Use `--namespace` to assign a namespace (e.g., `--namespace docs:notes`).
 
 Produces 9 distinct relationship types instead of generic "relates_to". Use `--fast` for proximity-only edges without embeddings.
 
@@ -144,9 +146,9 @@ GLiNER uses a DeBERTa v2 backbone + span classifier via ONNX Runtime. If unavail
 | `myelin setup-extension` | Bundle extension, install deps, download models |
 | `myelin doctor` | Health check with actionable diagnostics |
 | `myelin sleep` | Full maintenance cycle (consolidate + embed all agents) |
-| `myelin parse <path>` | Index code repo (tree-sitter AST) |
-| `myelin ingest <path>` | Ingest text documents (NER + embedding RE) |
-| `myelin vault <path>` | Index IDEA vault structure |
+| `myelin parse <path>` | Index code repo with tree-sitter (`--namespace`, `--embed`) |
+| `myelin ingest <path>` | Ingest text documents with NER + embedding RE (`--namespace`, `--embed`) |
+| `myelin vault <path>` | Index IDEA vault structure (`--namespace`, `--embed`) |
 | `myelin consolidate` | Run NREM/REM consolidation |
 | `myelin embed` | Generate/update embeddings |
 | `myelin query <text>` | Semantic + keyword search |

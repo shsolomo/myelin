@@ -60,8 +60,10 @@ Start a new Copilot CLI session (or run `/clear`). The extension loads automatic
 ### 4. Index your code (optional but recommended)
 
 ```bash
-myelin parse ./path/to/your-repo
+myelin parse ./path/to/your-repo --namespace repo:my-project --embed
 ```
+
+The `--namespace` flag partitions your graph by source. Use a consistent naming convention like `repo:name` for code and `docs:name` for documents. The `--embed` flag generates embeddings for semantic search.
 
 Extracts classes, methods, interfaces, functions, and their relationships using tree-sitter. Supports C#, TypeScript, JavaScript, Python, Go, JSON, YAML, Dockerfile, PowerShell, and Bicep.
 
@@ -84,14 +86,14 @@ Grow the knowledge graph from documents and agent activity.
 ### Ingest documents
 
 ```bash
-myelin ingest ./path/to/notes
+myelin ingest ./path/to/notes --namespace docs:notes --embed
 ```
 
 Chunks text files, extracts entities (people, tools, decisions, projects), and creates relationship edges. Works with markdown, plain text, meeting recaps — any text content.
 
 Use `--fast` to skip embedding-based relationship classification (faster, proximity-only edges):
 ```bash
-myelin ingest ./path/to/notes --fast
+myelin ingest ./path/to/notes --namespace docs:notes --fast
 ```
 
 ### Agent logging
@@ -195,9 +197,9 @@ myelin viz --category code
 ### Index multiple repos
 
 ```bash
-myelin parse ./frontend --namespace repo:frontend
-myelin parse ./backend --namespace repo:backend
-myelin parse ./infra --namespace repo:infra
+myelin parse ./frontend --namespace repo:frontend --embed
+myelin parse ./backend --namespace repo:backend --embed
+myelin parse ./infra --namespace repo:infra --embed
 myelin namespaces  # list all indexed namespaces
 ```
 
@@ -210,9 +212,9 @@ myelin namespaces  # list all indexed namespaces
 | `myelin init` | Create the graph database (also done by `setup-extension`) |
 | `myelin setup-extension` | Bundle and install the Copilot CLI extension |
 | `myelin doctor` | Health check with actionable diagnostics |
-| `myelin parse <path>` | Index a code repo with tree-sitter |
-| `myelin ingest <path>` | Ingest text documents (NER + relationship extraction) |
-| `myelin vault <path>` | Index an IDEA vault |
+| `myelin parse <path>` | Index a code repo with tree-sitter (`--namespace`, `--embed`) |
+| `myelin ingest <path>` | Ingest text documents with NER + relationship extraction (`--namespace`, `--embed`) |
+| `myelin vault <path>` | Index an IDEA vault (`--namespace`, `--embed`) |
 | `myelin sleep` | Full maintenance cycle (consolidate + embed all agents) |
 | `myelin consolidate` | Run consolidation for a specific agent |
 | `myelin embed` | Generate embeddings for semantic search |
@@ -260,8 +262,8 @@ This checks your graph database, schema, node counts, and embedding coverage. Fo
 #### Graph is empty (0 nodes)
 You've initialized but haven't indexed anything yet. Run:
 ```bash
-myelin parse ./your-repo          # for code
-myelin ingest ./your-notes        # for documents
+myelin parse ./your-repo --namespace repo:your-repo --embed   # for code
+myelin ingest ./your-notes --namespace docs:notes --embed     # for documents
 ```
 
 #### No embeddings (semantic search not working)
@@ -349,7 +351,7 @@ Logs are never deleted, so the graph can always be rebuilt from scratch:
 ```bash
 rm ~/.copilot/.working-memory/graph.db      # delete corrupted DB
 myelin init                                  # create fresh DB
-myelin parse ./your-repo                     # re-index code
+myelin parse ./your-repo --namespace repo:your-repo --embed  # re-index code
 myelin sleep                                 # replay all agent logs + embed
 ```
 

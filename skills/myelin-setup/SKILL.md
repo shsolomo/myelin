@@ -51,12 +51,14 @@ Ask the user what they want to index. There are three modes — any combination 
 Index source code with tree-sitter. Supports C#, TypeScript, JavaScript, Python, Go, YAML, JSON, Bicep, PowerShell, and Dockerfile.
 
 ```bash
-myelin parse /path/to/repo
+myelin parse /path/to/repo --namespace repo:my-project --embed
 ```
+
+Namespaces partition the graph by source. Use a consistent naming convention: `repo:name` for code, `docs:name` for documents, `vault:name` for vaults. The `--embed` flag generates embeddings for semantic search.
 
 Optional: specify a namespace to keep repos separate:
 ```bash
-myelin parse /path/to/repo --namespace repo:my-project
+myelin parse /path/to/repo --namespace repo:my-project --embed
 ```
 
 This creates `File`, `Class`, `Method`, `Interface`, `Function` nodes with `defines` and `contains` edges — the structural skeleton of the codebase.
@@ -71,14 +73,14 @@ myelin namespaces
 Ingest text files with entity extraction and relationship edges:
 
 ```bash
-myelin ingest /path/to/notes
+myelin ingest /path/to/notes --namespace docs:notes --embed
 ```
 
 Uses NER (GLiNER for high-precision zero-shot extraction, with regex/heuristic fallback if the model isn't available) to extract entities and create co-occurrence edges. GLiNER downloads automatically during `myelin setup-extension`.
 
 Use `--fast` to skip embedding-based relationship classification (faster, proximity-only edges):
 ```bash
-myelin ingest /path/to/notes --fast
+myelin ingest /path/to/notes --namespace docs:notes --fast
 ```
 
 #### Mode C: IDEA Vault (Structured Notes)
@@ -86,7 +88,7 @@ myelin ingest /path/to/notes --fast
 For IDEA-method vaults (Initiatives, Domains, Expertise, Archive):
 
 ```bash
-myelin vault /path/to/vault
+myelin vault /path/to/vault --namespace vault:main --embed
 ```
 
 #### Mode D: Agent Memory (Structured Logs)
@@ -187,10 +189,10 @@ myelin setup-extension
 # Restart Copilot CLI, then:
 
 # Index your codebase
-myelin parse ./my-project
+myelin parse ./my-project --namespace repo:my-project --embed
 
 # Ingest your notes
-myelin ingest ./my-notes
+myelin ingest ./my-notes --namespace docs:notes --embed
 
 # Consolidate + embed
 myelin sleep
@@ -206,9 +208,9 @@ myelin viz
 ### Index multiple repos
 
 ```bash
-myelin parse ./frontend --namespace repo:frontend
-myelin parse ./backend --namespace repo:backend
-myelin parse ./infra --namespace repo:infra
+myelin parse ./frontend --namespace repo:frontend --embed
+myelin parse ./backend --namespace repo:backend --embed
+myelin parse ./infra --namespace repo:infra --embed
 myelin namespaces  # shows all three
 ```
 
@@ -219,6 +221,6 @@ Logs are never deleted, so the graph can always be rebuilt:
 ```bash
 rm ~/.copilot/.working-memory/graph.db
 myelin init
-myelin parse ./my-repo
+myelin parse ./my-repo --namespace repo:my-repo --embed
 myelin sleep
 ```
