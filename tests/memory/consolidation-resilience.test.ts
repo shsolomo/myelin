@@ -144,12 +144,19 @@ describe('backupDatabase', () => {
     try {
       graph.addNode({ name: 'RotationTest' });
 
-      // Create 5 backups
+      // Pre-create 5 backup files with guaranteed unique timestamps
+      // (calling backupDatabase in a tight loop can produce identical
+      // timestamps on fast CI runners, causing overwrites — see #46)
+      const dbName = graph.db.name;
+      const dir = join(TEST_DIR);
       for (let i = 0; i < 5; i++) {
-        backupDatabase(graph);
+        const ts = `2026-01-0${i + 1}T00-00-00-000Z`;
+        writeFileSync(join(dir, `${dbName.split(/[\\/]/).pop()}.backup-${ts}`), '');
       }
 
-      const dir = join(TEST_DIR);
+      // One more backup + rotation
+      backupDatabase(graph);
+
       const backups = readdirSync(dir).filter(f => f.includes('.backup-'));
       expect(backups.length).toBe(3);
     } finally {
