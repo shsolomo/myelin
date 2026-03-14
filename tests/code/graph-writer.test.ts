@@ -180,5 +180,124 @@ describe('writeToGraph', () => {
     expect(result.files).toBe(0);
     expect(result.nodes).toBe(0);
     expect(result.edges).toBe(0);
+    expect(result.staleNodesRemoved).toBe(0);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Stale node cleanup
+  // ---------------------------------------------------------------------------
+
+  it('cleans stale nodes when allFilePaths excludes a previously indexed file', () => {
+    // Index two files
+    const files = [
+      makeParsedFile({
+        filePath: 'src/keep.ts',
+        language: 'typescript',
+        entities: [
+          makeEntity({ entityType: 'class', name: 'Keep', fullyQualifiedName: 'Keep', filePath: 'src/keep.ts', lineStart: 1, lineEnd: 10 }),
+        ],
+      }),
+      makeParsedFile({
+        filePath: 'src/delete-me.ts',
+        language: 'typescript',
+        entities: [
+          makeEntity({ entityType: 'class', name: 'DeleteMe', fullyQualifiedName: 'DeleteMe', filePath: 'src/delete-me.ts', lineStart: 1, lineEnd: 10 }),
+        ],
+      }),
+    ];
+
+    writeToGraph(files, dbPath, 'test-ns');
+
+    // Re-index with only keep.ts in allFilePaths (delete-me.ts was deleted from repo)
+    const result = writeToGraph(
+      [files[0]],
+      dbPath,
+      'test-ns',
+      ['src/keep.ts'],
+    );
+
+    expect(result.staleNodesRemoved).toBeGreaterThan(0);
+
+    // Verify stale nodes are gone
+    const db = new Database(dbPath);
+    const deletedNodes = db.prepare("SELECT COUNT(*) as c FROM nodes WHERE file_path = 'src/delete-me.ts'").get() as { c: number };
+    expect(deletedNodes.c).toBe(0);
+
+    // Verify kept nodes still exist
+    const keptNodes = db.prepare("SELECT COUNT(*) as c FROM nodes WHERE file_path = 'src/keep.ts'").get() as { c: number };
+    expect(keptNodes.c).toBeGreaterThan(0);
+    db.close();
+  });
+
+  it('stale cleanup only affects the correct namespace', () => {
+    // Index a file in namespace A
+    const fileA = makeParsedFile({
+      filePath: 'src/a.ts',
+      language: 'typescript',
+      entities: [
+        makeEntity({ entityType: 'class', name: 'A', fullyQualifiedName: 'A', filePath: 'src/a.ts', lineStart: 1, lineEnd: 10 }),
+      ],
+    });
+
+    // Index a file in namespace B
+    const fileB = makeParsedFile({
+      filePath: 'src/b.ts',
+      language: 'typescript',
+      entities: [
+        makeEntity({ entityType: 'class', name: 'B', fullyQualifiedName: 'B', filePath: 'src/b.ts', lineStart: 1, lineEnd: 10 }),
+      ],
+    });
+
+    writeToGraph([fileA], dbPath, 'ns-a');
+    writeToGraph([fileB], dbPath, 'ns-b');
+
+    // Re-index ns-a with an empty file list — should only clean ns-a nodes
+    const result = writeToGraph([], dbPath, 'ns-a', ['src/other.ts']);
+
+    expect(result.staleNodesRemoved).toBeGreaterThan(0);
+
+    // Verify ns-b nodes are untouched
+    const db = new Database(dbPath);
+    const nsBNodes = db.prepare("SELECT COUNT(*) as c FROM nodes WHERE namespace = 'ns-b'").get() as { c: number };
+    expect(nsBNodes.c).toBeGreaterThan(0);
+
+    // Verify ns-a nodes are cleaned
+    const nsANodes = db.prepare("SELECT COUNT(*) as c FROM nodes WHERE namespace = 'ns-a' AND file_path = 'src/a.ts'").get() as { c: number };
+    expect(nsANodes.c).toBe(0);
+    db.close();
+  });
+
+  it('returns staleNodesRemoved = 0 when no stale nodes exist', () => {
+    const pf = makeParsedFile({
+      filePath: 'src/x.ts',
+      language: 'typescript',
+      entities: [
+        makeEntity({ entityType: 'class', name: 'X', fullyQualifiedName: 'X', filePath: 'src/x.ts', lineStart: 1, lineEnd: 5 }),
+      ],
+    });
+
+    const result = writeToGraph([pf], dbPath, 'ns', ['src/x.ts']);
+    expect(result.staleNodesRemoved).toBe(0);
+  });
+
+  it('does not clean stale nodes when allFilePaths is not provided', () => {
+    const pf = makeParsedFile({
+      filePath: 'src/old.ts',
+      language: 'typescript',
+      entities: [
+        makeEntity({ entityType: 'class', name: 'Old', fullyQualifiedName: 'Old', filePath: 'src/old.ts', lineStart: 1, lineEnd: 10 }),
+      ],
+    });
+
+    writeToGraph([pf], dbPath, 'ns');
+
+    // Re-index without allFilePaths — no cleanup
+    const result = writeToGraph([], dbPath, 'ns');
+    expect(result.staleNodesRemoved).toBe(0);
+
+    const db = new Database(dbPath);
+    const nodes = db.prepare("SELECT COUNT(*) as c FROM nodes WHERE file_path = 'src/old.ts'").get() as { c: number };
+    expect(nodes.c).toBeGreaterThan(0);
+    db.close();
   });
 });

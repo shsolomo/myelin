@@ -114,7 +114,8 @@ export function writeToGraph(
   parsedFiles: ParsedFile[],
   dbPath?: string,
   namespace?: string,
-): { nodes: number; edges: number; files: number } {
+  allFilePaths?: string[],
+): { nodes: number; edges: number; files: number; staleNodesRemoved: number } {
   const resolvedPath = dbPath ?? DEFAULT_DB_PATH;
   const db = new Database(resolvedPath);
   db.pragma('journal_mode = WAL');
@@ -127,7 +128,7 @@ export function writeToGraph(
   );
   const hasNamespace = cols.has('namespace');
 
-  const totals = { nodes: 0, edges: 0, files: 0 };
+  const totals = { nodes: 0, edges: 0, files: 0, staleNodesRemoved: 0 };
 
   try {
     for (const pf of parsedFiles) {
@@ -145,6 +146,24 @@ export function writeToGraph(
       db.prepare(
         `UPDATE nodes SET namespace = ? WHERE category = 'code' AND (namespace IS NULL OR namespace = 'personal' OR namespace = 'unclassified')`,
       ).run(namespace);
+    }
+
+    // Clean stale nodes: files no longer in the repo for this namespace
+    if (allFilePaths && namespace && hasNamespace) {
+      const staleNodes = db.prepare(
+        `SELECT id, file_path FROM nodes
+         WHERE namespace = ? AND category = 'code' AND file_path IS NOT NULL
+         AND file_path NOT IN (${allFilePaths.map(() => '?').join(',')})`,
+      ).all(namespace, ...allFilePaths) as Array<{ id: string; file_path: string }>;
+
+      if (staleNodes.length > 0) {
+        const staleIds = staleNodes.map(n => n.id);
+        const placeholders = staleIds.map(() => '?').join(',');
+        db.prepare(`DELETE FROM edges WHERE source_id IN (${placeholders})`).run(...staleIds);
+        db.prepare(`DELETE FROM edges WHERE target_id IN (${placeholders})`).run(...staleIds);
+        db.prepare(`DELETE FROM nodes WHERE id IN (${placeholders})`).run(...staleIds);
+        totals.staleNodesRemoved = staleNodes.length;
+      }
     }
   } finally {
     db.close();
