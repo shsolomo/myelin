@@ -1,6 +1,6 @@
 {
   "name": "myelin",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Knowledge graph memory system for AI agents. Semantic search, NER extraction, brain-inspired consolidation.",
   "type": "module",
   "main": "dist/index.js",
@@ -72,7 +72,7 @@
     "@types/node": "^22.0.0",
     "esbuild": "^0.27.3",
     "rimraf": "^6.0.0",
-    "typescript": "^5.7.0",
+    "typescript": "^5.9.3",
     "vitest": "^3.0.0"
   },
   "overrides": {
