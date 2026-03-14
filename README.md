@@ -45,7 +45,7 @@ myelin setup-extension
 
 That's it. `setup-extension` initializes the graph database, bundles the Copilot CLI extension, and downloads the NER + embedding models (~660MB one-time). Restart Copilot CLI and every agent has memory.
 
-See [INSTALL.md](INSTALL.md) for detailed setup, troubleshooting, and advanced configuration.
+See [INSTALL.md](INSTALL.md) for detailed setup and troubleshooting. See [UPGRADE.md](UPGRADE.md) for upgrading between versions.
 
 ## What Agents Get
 
