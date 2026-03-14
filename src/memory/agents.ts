@@ -38,6 +38,7 @@ export function getBootContext(
       sourceAgent: agentName,
       minSalience,
       limit,
+      ceiling: 1,
     });
 
     // Get nodes tagged with this agent's domain
@@ -45,6 +46,7 @@ export function getBootContext(
       tag: agentName,
       minSalience,
       limit,
+      ceiling: 1,
     });
 
     // Merge and deduplicate
