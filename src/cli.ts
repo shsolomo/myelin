@@ -13,7 +13,7 @@ import chalk from 'chalk';
 import Table from 'cli-table3';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 
 import { KnowledgeGraph, NodeType, RelationshipType } from './memory/graph.js';
@@ -662,6 +662,89 @@ program
     console.log(
       `\n📊 Graph state: ${graphStats.nodeCount} nodes, ${graphStats.edgeCount} edges, avg salience ${graphStats.avgSalience.toFixed(3)}`,
     );
+
+    graph.close();
+    process.exit(0);
+  });
+
+program
+  .command('sleep')
+  .description('Run a full maintenance cycle — consolidation + embedding for all agents')
+  .option('--db <path>', 'Path to graph.db')
+  .action(async (opts) => {
+    console.log('\n🌙 Processing memories...\n');
+
+    // Discover agents with log directories
+    const agentsDir = join(homedir(), '.copilot', '.working-memory', 'agents');
+    let agents: string[] = [];
+    if (existsSync(agentsDir)) {
+      agents = readdirSync(agentsDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name);
+    }
+
+    if (agents.length === 0) {
+      console.log(chalk.yellow('  No agent logs found. Run some sessions first, then try again.'));
+      process.exit(0);
+    }
+
+    const graph = openGraph(opts.db);
+
+    // NREM + REM for each agent
+    let totalEntries = 0;
+    let totalNodes = 0;
+    let totalEdges = 0;
+
+    for (const agent of agents) {
+      const logPath = resolveLogPath(agent);
+      if (!logPath) {
+        console.log(chalk.dim(`  ⏭  ${agent} — no logs, skipping`));
+        continue;
+      }
+
+      console.log(`  🧠 Consolidating ${agent}...`);
+
+      try {
+        const nrem = await nremReplay(graph, logPath, { agentName: agent });
+        totalEntries += nrem.entriesProcessed;
+        totalNodes += nrem.nodesAdded;
+        totalEdges += nrem.edgesAdded;
+
+        console.log(
+          chalk.dim(`     ${nrem.entriesProcessed} entries → ${nrem.nodesAdded} nodes, ${nrem.edgesAdded} edges`),
+        );
+      } catch (err: any) {
+        console.log(chalk.yellow(`     ⚠️ NREM failed: ${err.message}`));
+      }
+
+      try {
+        const rem = remRefine(graph);
+        if (rem.nodesPruned > 0 || rem.edgesPruned > 0) {
+          console.log(chalk.dim(`     Pruned: ${rem.nodesPruned} nodes, ${rem.edgesPruned} edges`));
+        }
+      } catch (err: any) {
+        console.log(chalk.yellow(`     ⚠️ REM failed: ${err.message}`));
+      }
+    }
+
+    // Embedding pass
+    console.log('\n  🔗 Embedding nodes...');
+    try {
+      const embedded = await embedAllNodes(graph);
+      console.log(chalk.dim(`     ${embedded} nodes embedded`));
+    } catch {
+      console.log(chalk.dim('     Embedding model not available — skipped'));
+    }
+
+    // Summary
+    const graphStats = graph.stats();
+    console.log(
+      `\n✅ Sleep complete — ${totalEntries} entries processed, ${totalNodes} nodes added, ${totalEdges} edges created`,
+    );
+    console.log(
+      `📊 Graph: ${graphStats.nodeCount} nodes, ${graphStats.edgeCount} edges, avg salience ${graphStats.avgSalience.toFixed(3)}`,
+    );
+    console.log(chalk.dim('\n💡 Run `myelin sleep` nightly for best results. Add to cron or Task Scheduler.\n'));
 
     graph.close();
     process.exit(0);
