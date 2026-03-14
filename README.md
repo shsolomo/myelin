@@ -1,121 +1,57 @@
 # Myelin
 
-Knowledge graph memory system for AI agents. Named after the neural sheath that makes signals travel faster the more a path is used — that's what this tool does for agent memory.
+Knowledge graph memory system for AI agents. Named after the neural sheath that makes signals travel faster the more a path is used — that's what this does for agent memory.
 
-Myelin gives AI agents persistent, searchable memory across sessions. It combines local NLP models (zero API calls) with a graph database to extract entities, classify relationships, and build a navigable knowledge structure from code, notes, and agent activity.
+Myelin gives AI agents persistent, searchable memory across sessions. It uses brain-inspired consolidation (NREM/REM phases) to extract knowledge from agent activity, local NLP models for entity recognition and semantic search, and a graph database that reinforces what matters and forgets what doesn't.
 
-## Architecture
+**Fully local. Zero API calls. Your memory stays on your machine.**
+
+## How It Works
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                              INPUT SOURCES                                  │
-│                                                                              │
-│   Code Repos          Text Documents          Agent Logs                     │
-│   (C#, TS, Py,        (markdown, notes,       (JSONL structured              │
-│    Go, YAML...)        meeting recaps)          events per agent)             │
-│       │                      │                       │                       │
-│       ▼                      ▼                       ▼                       │
-│  ┌─────────┐         ┌──────────────┐        ┌──────────────┐               │
-│  │  parse   │         │   ingest     │        │ consolidate  │               │
-│  │ (code)   │         │ (documents)  │        │ (NREM/REM)   │               │
-│  └────┬─────┘         └──────┬───────┘        └──────┬───────┘               │
-│       │                      │                       │                       │
-└───────┼──────────────────────┼───────────────────────┼───────────────────────┘
-        │                      │                       │
-        ▼                      ▼                       ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                          LOCAL NLP MODELS                                    │
-│                      (no API calls, fully offline)                           │
-│                                                                              │
-│   Tree-sitter             GLiNER (ONNX)          all-MiniLM-L6-v2           │
-│   AST parsing             Zero-shot NER          Sentence embeddings         │
-│   9 languages             Entity extraction      384-dim vectors             │
-│                           8 entity types         Cosine similarity           │
-│                                │                       │                     │
-│                                ▼                       ▼                     │
-│                     ┌──────────────────────────────────────┐                 │
-│                     │   Embedding-based RE                 │                 │
-│                     │   Context between entity pairs       │                 │
-│                     │   compared against 37 prototype      │                 │
-│                     │   sentences → 9 relationship types   │                 │
-│                     └──────────────────────────────────────┘                 │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-        │                      │                       │
-        ▼                      ▼                       ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                        KNOWLEDGE GRAPH                                      │
-│                   (SQLite + FTS5 + sqlite-vec)                              │
-│                                                                              │
-│   Nodes                    Edges                    Search                   │
-│   ─────                    ─────                    ──────                   │
-│   person, tool,            authored_by,             Semantic: KNN via        │
-│   decision, bug,           belongs_to,              sqlite-vec embeddings    │
-│   pattern, initiative,     depends_on,                                       │
-│   meeting, rule,           mentioned_in,            Keyword: FTS5            │
-│   concept, convention      blocked_by,              full-text search         │
-│                            supersedes,                                       │
-│   Code: Class, Method,     evolved_into,            Hybrid: semantic first,  │
-│   Interface, Function,     learned_from,            FTS5 fallback            │
-│   Config, File, Enum       conflicts_with                                   │
-│                                                                              │
-│   Salience Scoring         Homeostatic Decay        Reinforcement            │
-│   importance × 0.7         Exponential forgetting   Idempotent upsert:       │
-│   + novelty × 0.3          curve with temporal      boost existing nodes     │
-│                            kernel                   instead of duplicating   │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                         AGENT INTERFACE                                     │
-│                                                                              │
-│   CLI Commands              Extension Tools           Lifecycle Hooks        │
-│   ────────────              ───────────────           ───────────────        │
-│   myelin query              myelin_query              onSessionStart         │
-│   myelin parse              myelin_boot               onUserPromptSubmitted  │
-│   myelin ingest             myelin_log                onSessionEnd           │
-│   myelin consolidate        myelin_show                                      │
-│   myelin viz                myelin_stats                                     │
-│   myelin agent boot/log                                                      │
-│   myelin vault                                                               │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
+  Code Repos          Text Documents          Agent Logs
+  (10 languages)      (markdown, notes,       (JSONL structured
+                       meeting recaps)         events per agent)
+       │                     │                      │
+       ▼                     ▼                      ▼
+  ┌─────────┐        ┌──────────────┐       ┌──────────────┐
+  │  parse   │        │   ingest     │       │ consolidate  │
+  │ (tree-   │        │ (GLiNER NER  │       │ (NREM/REM    │
+  │  sitter) │        │  + embed RE) │       │  phases)     │
+  └────┬─────┘        └──────┬───────┘       └──────┬───────┘
+       │                     │                      │
+       └─────────────────────┼──────────────────────┘
+                             ▼
+                   ┌──────────────────┐
+                   │  Knowledge Graph  │
+                   │  SQLite + FTS5   │
+                   │  + sqlite-vec    │
+                   └────────┬─────────┘
+                            │
+              ┌─────────────┼─────────────┐
+              ▼             ▼             ▼
+         5 Tools       4 Hooks      CLI Commands
+         (query,       (auto-boot,  (parse, ingest,
+          boot,         context,     sleep, query,
+          log...)       auto-log)    viz...)
 ```
-
-## Three Pipelines
-
-### `myelin parse` — Code Indexing
-Extracts structural entities from source code using **tree-sitter** AST parsing. Creates nodes for classes, methods, interfaces, functions, and edges for inheritance, containment, and imports.
-
-**Languages:** C#, TypeScript/TSX, Python, Go, JSON, YAML, Dockerfile, PowerShell, Bicep
-
-### `myelin ingest` — Document Ingestion
-General-purpose pipeline for any text file. Chunks documents, runs **GLiNER** NER to extract entities, then uses **all-MiniLM-L6-v2** embeddings to classify relationships between entity pairs by comparing context against prototype sentences.
-
-**Fully local — zero API calls.** Produces 9 distinct relationship types instead of generic "relates_to".
-
-### `myelin consolidate` — Memory Consolidation (NREM/REM)
-Brain-inspired two-phase consolidation of agent activity logs:
-
-- **NREM** (Replay → Extract → Score → Transfer): Read agent logs, extract entities via NER, score salience using dual-signal model (importance + novelty), transfer to graph
-- **REM** (Decay → Prune → Refine): Apply temporal decay, remove stale nodes/edges, evolve associations
 
 ## Install
 
 ```bash
 npm install -g github:shsolomo/myelin
-myelin init
-myelin setup-extension    # Install Copilot CLI extension
+myelin setup-extension
 ```
 
-See [INSTALL.md](INSTALL.md) for detailed setup instructions.
+That's it. `setup-extension` initializes the graph database, bundles the Copilot CLI extension, and downloads the NER + embedding models (~660MB one-time). Restart Copilot CLI and every agent has memory.
 
-## Copilot CLI Extension
+See [INSTALL.md](INSTALL.md) for detailed setup, troubleshooting, and advanced configuration.
 
-This is myelin's primary integration point. After `myelin setup-extension`, every Copilot CLI agent gets:
+## What Agents Get
 
-**Tools:**
+After setup, every Copilot CLI agent automatically gets:
+
+**5 tools:**
 
 | Tool | What it does |
 |------|-------------|
@@ -125,13 +61,14 @@ This is myelin's primary integration point. After `myelin setup-extension`, ever
 | `myelin_show` | Inspect a node and its connections |
 | `myelin_stats` | Graph statistics and embedding coverage |
 
-**Lifecycle hooks:**
-- `onSessionStart` — graph context auto-injected before first message
-- `onUserPromptSubmitted` — relevant context added per message via semantic search
-- `onSessionEnd` — session summary auto-logged
-- `onErrorOccurred` — automatic retry on recoverable model errors
+**4 lifecycle hooks** (automatic, no agent action needed):
 
-The extension uses `@github/copilot-sdk` and is bundled into a single `extension.mjs` file via esbuild.
+| Hook | What it does |
+|------|-------------|
+| `onSessionStart` | Auto-detects agent, injects graph context |
+| `onUserPromptSubmitted` | Surfaces relevant knowledge per message |
+| `onSessionEnd` | Logs session summary automatically |
+| `onErrorOccurred` | Retries on recoverable model errors |
 
 ## Quick Start
 
@@ -139,71 +76,116 @@ The extension uses `@github/copilot-sdk` and is bundled into a single `extension
 # Index a codebase
 myelin parse ./my-project
 
-# Ingest text documents (notes, meeting recaps, etc.)
+# Ingest text documents
 myelin ingest ./my-notes
 
-# Log agent observations
-myelin agent log myagent finding "Auth module uses JWT with 24h expiry" --tag security
+# Run a full maintenance cycle (consolidate + embed)
+myelin sleep
 
-# Consolidate agent logs into the graph
-myelin consolidate --agent myagent
-
-# Generate embeddings for semantic search
-myelin embed
-
-# Search
+# Search the graph
 myelin query "how does authentication work"
 
-# Inspect a node and its connections
-myelin show "authentication"
+# Health check
+myelin doctor
 
 # Visualize in browser
 myelin viz
 ```
+
+## Three Pipelines
+
+### `myelin parse` — Code Indexing
+Extracts structural entities from source code using **tree-sitter** AST parsing. Creates nodes for classes, methods, interfaces, functions, and edges for inheritance, containment, and imports.
+
+**Languages:** C#, TypeScript/TSX, JavaScript, Python, Go, JSON, YAML, Dockerfile, PowerShell, Bicep
+
+### `myelin ingest` — Document Ingestion
+General-purpose pipeline for any text file. Chunks documents, runs **GLiNER** zero-shot NER to extract entities, then uses **all-MiniLM-L6-v2** embeddings to classify relationships between entity pairs by comparing context against prototype sentences.
+
+Produces 9 distinct relationship types instead of generic "relates_to". Use `--fast` for proximity-only edges without embeddings.
+
+### `myelin sleep` — Memory Consolidation
+Brain-inspired two-phase consolidation of agent activity logs:
+
+- **NREM** (Replay → Extract → Score → Transfer): Reads agent logs, extracts entities via NER, scores salience using a dual-signal model (importance × 0.7 + novelty × 0.3), transfers to graph
+- **REM** (Decay → Prune → Refine): Applies temporal decay, removes stale nodes/edges, homeostatic maintenance
+
+Consolidation is idempotent — running it twice on the same logs reinforces existing nodes rather than creating duplicates.
+
+## Knowledge Graph
+
+Nodes are typed (Person, Tool, Decision, Pattern, Bug, Initiative, Meeting, Rule, Convention, Concept, plus code types like Class, Method, Interface) with salience scores, sensitivity levels, and optional pinning.
+
+Edges are typed (RelatesTo, DependsOn, Supersedes, LearnedFrom, BelongsTo, AuthoredBy, EvolvedInto, etc.) with weights and reinforcement timestamps.
+
+**Search** is hybrid: semantic search first (KNN via sqlite-vec on 384-dim embeddings), with FTS5 keyword fallback when embeddings are unavailable or results are poor.
+
+**Decay** follows an exponential forgetting curve — recently reinforced nodes decay slower. Nodes below the salience threshold AND older than the age cutoff are pruned. Both conditions must hold to prevent premature forgetting.
+
+**Pinned nodes** never decay and always load at boot — useful for constitutional knowledge that should never be forgotten.
+
+## Local Models
+
+All models run locally. No data leaves your machine. Both models download automatically during `myelin setup-extension`.
+
+| Model | Purpose | Size |
+|-------|---------|------|
+| [GLiNER](https://huggingface.co/shsolomo/gliner-small-v2.1-onnx) (gliner_small-v2.1) | Zero-shot NER — entity extraction | ~583MB |
+| all-MiniLM-L6-v2 | Sentence embeddings — 384-dim vectors for semantic search | ~80MB |
+| Tree-sitter grammars | AST parsing — 10 languages | ~5MB each |
+
+GLiNER uses a DeBERTa v2 backbone + span classifier via ONNX Runtime. If unavailable, NER falls back to regex/heuristic patterns — functional but lower precision.
 
 ## CLI Reference
 
 | Command | Description |
 |---------|-------------|
 | `myelin init` | Initialize graph database |
+| `myelin setup-extension` | Bundle extension, install deps, download models |
+| `myelin doctor` | Health check with actionable diagnostics |
+| `myelin sleep` | Full maintenance cycle (consolidate + embed all agents) |
 | `myelin parse <path>` | Index code repo (tree-sitter AST) |
 | `myelin ingest <path>` | Ingest text documents (NER + embedding RE) |
-| `myelin ingest <path> --fast` | Ingest with proximity-only edges (no embeddings) |
 | `myelin vault <path>` | Index IDEA vault structure |
+| `myelin consolidate` | Run NREM/REM consolidation |
+| `myelin embed` | Generate/update embeddings |
 | `myelin query <text>` | Semantic + keyword search |
 | `myelin show <name>` | Show node and connections |
 | `myelin stats` | Graph statistics |
 | `myelin nodes` | List nodes with filters |
-| `myelin embed` | Generate/update embeddings |
-| `myelin consolidate` | Run NREM/REM consolidation |
-| `myelin agent boot <name>` | Load agent context from graph |
-| `myelin agent log <name> <type> <summary>` | Log structured event |
-| `myelin viz` | D3.js graph visualization |
-| `myelin setup-extension` | Install Copilot CLI extension |
+| `myelin pin <name>` | Pin a node (never decays) |
+| `myelin classify <name>` | Set sensitivity level on a node |
+| `myelin viz` | Interactive graph visualization in browser |
+| `myelin agent boot <name>` | Generate agent briefing from graph |
+| `myelin agent log <name> <type> <msg>` | Log structured event |
+| `myelin agent log-show <name>` | View agent's log entries |
+| `myelin agent instructions <name>` | Generate logging instructions for agent definition |
+| `myelin namespaces` | List indexed namespaces |
+| `myelin update` | Update myelin to latest version |
 
 ## Development
 
-### Testing
-
 ```bash
-npm test              # Run all tests
-npm run test:watch    # Watch mode
+npm test              # vitest — all tests
+npm run test:watch    # watch mode
+npm run build         # TypeScript compile
+npm run bundle-extension  # esbuild bundle for Copilot CLI
 ```
 
-Tests are **required** for all code changes. The CI pipeline runs tests on every push and PR across Node 20/22 on Linux, Windows, and macOS. Code that ships without tests (unless impractical — e.g., CLI glue, visualization servers) will fail review.
+Tests are **required** for all code changes. CI runs on every push and PR across Node 20/22 on Linux, Windows, and macOS (520+ tests).
 
-Test files live in `tests/` mirroring the `src/` structure. Use Vitest with in-memory SQLite for graph tests and mocked NER/embeddings for extraction tests.
+Test files live in `tests/` mirroring `src/` structure. Use Vitest with in-memory SQLite for graph tests and mocked NER/embeddings for extraction tests.
 
-## Local Models
+## Design Principles
 
-| Model | Purpose | Size | Runtime |
-|-------|---------|------|---------|
-| GLiNER (gliner_small-v2.1) | Zero-shot NER — 8 entity types | ~600MB ONNX | onnxruntime-node |
-| all-MiniLM-L6-v2 | Sentence embeddings — 384-dim vectors | ~80MB | @huggingface/transformers |
-| Tree-sitter grammars | AST parsing — 9 languages | ~5MB each | tree-sitter native |
+See [NORTH-STAR.md](NORTH-STAR.md) for the full architecture philosophy. Key principles:
 
-All models run locally. No data leaves your machine.
+1. **Brain-faithful** — every subsystem maps to a neuroscience concept
+2. **Local-first** — works offline, no cloud APIs required
+3. **Reinforcement over duplication** — boost existing knowledge, don't duplicate
+4. **Single graph, many views** — one graph serves all agents and projects
+5. **Progressive complexity** — 5-minute install to full semantic memory
 
 ## License
 
-MIT
+Apache-2.0
