@@ -46,6 +46,32 @@ function detectAgentName(): string | null {
   return null;
 }
 
+const STOPWORDS = new Set([
+  "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+  "have", "has", "had", "do", "does", "did", "will", "would", "could",
+  "should", "may", "might", "shall", "can", "need", "must",
+  "i", "me", "my", "we", "our", "you", "your", "he", "she", "it",
+  "they", "them", "their", "this", "that", "these", "those",
+  "in", "on", "at", "to", "for", "of", "with", "by", "from", "as",
+  "into", "about", "between", "through", "after", "before", "above",
+  "and", "or", "but", "not", "no", "nor", "so", "if", "then", "than",
+  "what", "which", "who", "whom", "how", "when", "where", "why",
+  "all", "each", "every", "both", "few", "more", "most", "some", "any",
+  "just", "also", "very", "too", "only", "still", "already", "even",
+  "here", "there", "up", "out", "over", "now", "get", "make", "like",
+  "know", "think", "see", "come", "go", "want", "use", "find", "tell",
+]);
+
+/** Extract meaningful keywords from a prompt for FTS5 search. */
+function extractKeywords(prompt: string): string[] {
+  return prompt
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, " ")
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !STOPWORDS.has(w))
+    .slice(0, 8);
+}
+
 const session = await joinSession({
   onPermissionRequest: approveAll,
 
@@ -78,19 +104,43 @@ const session = await joinSession({
         if (!graph) return;
 
         try {
-          const queryEmbedding = await getEmbedding(input.prompt);
-          if (queryEmbedding.length === 0) return;
+          // Try semantic search first
+          let context: string | null = null;
+          let searchMethod = "semantic";
 
-          const results = graph.semanticSearch(queryEmbedding, 5, "knowledge");
-          if (results.length === 0) return;
+          try {
+            const queryEmbedding = await getEmbedding(input.prompt);
+            if (queryEmbedding.length > 0) {
+              const results = graph.semanticSearch(queryEmbedding, 5, "knowledge");
+              const relevant = results.filter((r: any) => r.distance < 1.2);
+              if (relevant.length > 0) {
+                context = relevant
+                  .map((r: any) => `- **${r.node.name}** (${r.node.type}): ${r.node.description?.slice(0, 150)}`)
+                  .join("\n");
+              }
+            }
+          } catch {
+            // Embedding unavailable — fall through to FTS5
+          }
 
-          const relevant = results.filter((r: any) => r.distance < 1.2);
-          if (relevant.length === 0) return;
+          // FTS5 fallback when semantic search yields nothing
+          if (!context) {
+            const keywords = extractKeywords(input.prompt);
+            if (keywords.length > 0) {
+              const ftsQuery = keywords.join(" OR ");
+              const nodes = graph.searchNodes(ftsQuery, 5);
+              if (nodes.length > 0) {
+                searchMethod = "keyword";
+                context = nodes
+                  .map((n: any) => `- **${n.name}** (${n.type}): ${n.description?.slice(0, 150)}`)
+                  .join("\n");
+              }
+            }
+          }
 
-          const context = relevant
-            .map((r: any) => `- **${r.node.name}** (${r.node.type}): ${r.node.description?.slice(0, 150)}`)
-            .join("\n");
+          if (!context) return;
 
+          await session.log(`Myelin context injected (${searchMethod} search)`);
           return {
             additionalContext: `## Relevant Graph Context (Myelin)\n${context}`,
           };
