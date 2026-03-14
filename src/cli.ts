@@ -84,6 +84,32 @@ function collect(value: string, previous: string[]): string[] {
   return previous.concat([value]);
 }
 
+/** Run embedAllNodes if --embed flag is set. Wraps in try/catch for graceful fallback. */
+async function runEmbedIfRequested(graph: KnowledgeGraph, embed?: boolean): Promise<void> {
+  if (!embed) return;
+  console.log('\n  🔗 Embedding nodes...');
+  try {
+    const count = await embedAllNodes(graph);
+    console.log(chalk.dim(`     ${count} nodes embedded`));
+  } catch {
+    console.log(chalk.dim('     Embedding skipped (model unavailable)'));
+  }
+}
+
+/** Ensure graph DB exists, auto-initializing if needed. Returns the DB path. */
+function ensureGraphDb(dbOpt?: string): string {
+  const dbPath = resolveDbPath(dbOpt);
+  if (!existsSync(dbPath)) {
+    console.log(chalk.cyan('  Initializing graph database...'));
+    mkdirSync(dirname(dbPath), { recursive: true });
+    const db = new Database(dbPath);
+    initSchema(db);
+    extendSchemaForCode(db);
+    db.close();
+  }
+  return dbPath;
+}
+
 // ── Program ──────────────────────────────────────────────────────────────────
 
 program
@@ -607,6 +633,7 @@ program
   .option('-p, --phase <phase>', 'Phase: nrem, rem, or both', 'both')
   .option('-s, --since <date>', 'Process entries since date (YYYY-MM-DD)')
   .option('--decay-rate <rate>', 'Decay rate for REM phase', '0.05')
+  .option('--embed', 'Run embedding after consolidation')
   .option('--db <path>', 'Path to graph.db')
   .action(async (opts) => {
     const phase = opts.phase;
@@ -657,6 +684,8 @@ program
       console.log(`  Edges pruned: ${rem.edgesPruned}`);
       console.log(`  Associations created: ${rem.associationsCreated}`);
     }
+
+    await runEmbedIfRequested(graph, opts.embed);
 
     const graphStats = graph.stats();
     console.log(
@@ -1019,8 +1048,9 @@ program
   .description('Index a repository into the knowledge graph using tree-sitter')
   .argument('<repo-path>', 'Path to the git repository root')
   .option('--namespace <ns>', 'Namespace tag (default: repo directory name)')
+  .option('--embed', 'Run embedding after indexing')
   .option('--db <path>', 'Path to graph.db')
-  .action((repoPath: string, opts: { db?: string; namespace?: string }) => {
+  .action(async (repoPath: string, opts: { db?: string; namespace?: string; embed?: boolean }) => {
     if (!existsSync(repoPath)) {
       console.error(chalk.red(`Repository path does not exist: ${repoPath}`));
       process.exit(1);
@@ -1069,6 +1099,12 @@ program
     if (result.staleNodesRemoved > 0) {
       console.log(chalk.yellow(`🧹 Cleaned ${result.staleNodesRemoved} stale nodes from deleted/renamed files`));
     }
+
+    if (opts.embed) {
+      const graph = new KnowledgeGraph(dbPath);
+      await runEmbedIfRequested(graph, true);
+      graph.close();
+    }
   });
 
 // ── Namespaces ───────────────────────────────────────────────────────────────
@@ -1110,8 +1146,9 @@ program
   .option('--namespace <ns>', 'Namespace for ingested nodes')
   .option('--agent <name>', 'Source agent name', 'ingest')
   .option('--fast', 'Skip embedding-based relationship classification (proximity only)')
+  .option('--embed', 'Run embedding after ingestion')
   .option('--db <path>', 'Path to graph.db')
-  .action(async (targetPath: string, opts: { namespace?: string; agent: string; fast?: boolean; db?: string }) => {
+  .action(async (targetPath: string, opts: { namespace?: string; agent: string; fast?: boolean; embed?: boolean; db?: string }) => {
     const { ingestDirectory } = await import('./memory/ingest.js');
     const { resolve } = await import('node:path');
 
@@ -1146,9 +1183,12 @@ program
         console.log(`  ${rel}: ${count}`);
       }
     }
+
+    await runEmbedIfRequested(graph, opts.embed);
+    graph.close();
   });
 
-// ── Vault Indexing ───────────────────────────────────────────────────────────
+// ── Vault Indexing───────────────────────────────────────────────────────────
 
 program
   .command('vault')
@@ -1156,8 +1196,9 @@ program
   .description('Index an IDEA vault (Initiatives, Domains, Expertise, Archive) into the knowledge graph')
   .option('--namespace <ns>', 'Namespace for vault nodes', 'vault')
   .option('--agent <name>', 'Source agent name', 'vault-parser')
+  .option('--embed', 'Run embedding after indexing')
   .option('--db <path>', 'Path to graph.db')
-  .action(async (vaultPath: string, opts: { namespace: string; agent: string; db?: string }) => {
+  .action(async (vaultPath: string, opts: { namespace: string; agent: string; embed?: boolean; db?: string }) => {
     const { indexVault } = await import('./memory/vault-parser.js');
     const { resolve } = await import('node:path');
 
@@ -1186,9 +1227,12 @@ program
     console.log(`\nPeople:      ${result.peopleFound.join(', ')}`);
     console.log(`Domains:     ${result.domainsFound.join(', ')}`);
     console.log(`Initiatives: ${result.initiativesFound.join(', ')}`);
+
+    await runEmbedIfRequested(graph, opts.embed);
+    graph.close();
   });
 
-// ── Visualization ────────────────────────────────────────────────────────────
+// ── Visualization────────────────────────────────────────────────────────────
 
 program
   .command('viz')
@@ -1235,6 +1279,9 @@ program
     const { cpSync } = await import('node:fs');
     const myPkg = join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '..');
     const extTarget = join(homedir(), '.copilot', 'extensions', 'myelin');
+
+    // Step 0: Auto-init graph DB if it doesn't exist
+    ensureGraphDb();
 
     // Step 1: Bundle the extension
     console.log(chalk.cyan('Bundling extension...'));
