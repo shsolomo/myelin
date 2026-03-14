@@ -286,6 +286,7 @@ program
   .command('show')
   .description('Show a node and its connected edges')
   .argument('<name>', 'Name or partial name to search for')
+  .option('--ceiling <n>', 'Max sensitivity level to include (0-3)', '1')
   .option('--db <path>', 'Path to graph.db')
   .action((name: string, opts) => {
     const db = openDb(opts.db);
@@ -294,10 +295,18 @@ program
     const hasCategory = cols.has('category');
     const hasLineStart = cols.has('line_start');
     const hasLineEnd = cols.has('line_end');
+    const hasSensitivity = cols.has('sensitivity');
+    const ceiling = parseInt(opts.ceiling);
 
-    const rows = db.prepare(
-      'SELECT * FROM nodes WHERE name LIKE ? ORDER BY salience DESC LIMIT 10',
-    ).all(`%${name}%`) as Array<Record<string, unknown>>;
+    let query = 'SELECT * FROM nodes WHERE name LIKE ?';
+    const params: unknown[] = [`%${name}%`];
+    if (hasSensitivity) {
+      query += ' AND (sensitivity IS NULL OR sensitivity <= ?)';
+      params.push(ceiling);
+    }
+    query += ' ORDER BY salience DESC LIMIT 10';
+
+    const rows = db.prepare(query).all(...params) as Array<Record<string, unknown>>;
 
     if (!rows.length) {
       console.log(chalk.yellow(`No nodes found matching '${name}'`));
@@ -312,6 +321,15 @@ program
         console.log(`  Category: ${row.category}`);
       }
       console.log(`  Salience: ${(row.salience as number).toFixed(2)}`);
+
+      if (hasSensitivity && row.sensitivity !== null && row.sensitivity !== undefined) {
+        const level = row.sensitivity as number;
+        const labels = ['public', 'internal', 'confidential', 'restricted'];
+        console.log(`  Sensitivity: ${level} (${labels[level] ?? 'unknown'})`);
+        if (row.sensitivity_reason) {
+          console.log(`  Sensitivity reason: ${row.sensitivity_reason}`);
+        }
+      }
 
       if (hasFilePath && row.file_path) {
         let lineInfo = '';
@@ -373,6 +391,7 @@ program
   .option('-d, --desc <text>', 'Description', '')
   .option('-s, --salience <n>', 'Salience score', '0.5')
   .option('-a, --agent <name>', 'Source agent', 'manual')
+  .option('--sensitivity <n>', 'Sensitivity level (0=public, 1=internal, 2=confidential, 3=restricted)')
   .option('--tags <tags>', 'Comma-separated tags')
   .option('--db <path>', 'Path to graph.db')
   .action((opts) => {
@@ -384,8 +403,59 @@ program
       salience: parseFloat(opts.salience),
       sourceAgent: opts.agent,
       tags: opts.tags ? opts.tags.split(',').map((t: string) => t.trim()) : [],
+      sensitivity: opts.sensitivity !== undefined ? parseInt(opts.sensitivity) : undefined,
     });
     console.log(`Added node: ${node.id} (${node.type}: ${node.name})`);
+    graph.close();
+    process.exit(0);
+  });
+
+program
+  .command('classify')
+  .description('Set sensitivity level on a node')
+  .argument('<node-id>', 'Node ID to classify')
+  .requiredOption('--level <n>', 'Sensitivity level (0=public, 1=internal, 2=confidential, 3=restricted)')
+  .option('--reason <text>', 'Reason for classification (required when downgrading)')
+  .option('--db <path>', 'Path to graph.db')
+  .action((nodeId: string, opts: { level: string; reason?: string; db?: string }) => {
+    const level = parseInt(opts.level);
+    if (isNaN(level) || level < 0 || level > 3) {
+      console.error(chalk.red('Level must be 0-3'));
+      process.exit(1);
+    }
+
+    const graph = openGraph(opts.db);
+    const existing = graph.getNode(nodeId);
+    if (!existing) {
+      console.error(chalk.red(`Node not found: ${nodeId}`));
+      graph.close();
+      process.exit(1);
+    }
+
+    // Require reason when downgrading (lowering level) for audit trail
+    const currentLevel = existing.sensitivity ?? 0;
+    if (level < currentLevel && !opts.reason) {
+      console.error(chalk.red('--reason is required when downgrading sensitivity level'));
+      graph.close();
+      process.exit(1);
+    }
+
+    const labels = ['public', 'internal', 'confidential', 'restricted'];
+    const fields: { sensitivity: number; sensitivityReason?: string } = { sensitivity: level };
+    if (opts.reason) {
+      fields.sensitivityReason = opts.reason;
+    }
+
+    const updated = graph.updateNode(nodeId, fields);
+    if (updated) {
+      console.log(`${chalk.green('✅')} ${existing.name}: sensitivity ${currentLevel}→${level} (${labels[level]})`);
+      if (opts.reason) {
+        console.log(`   Reason: ${opts.reason}`);
+      }
+    } else {
+      console.error(chalk.red('Failed to update node'));
+    }
+
     graph.close();
     process.exit(0);
   });
@@ -395,18 +465,20 @@ program
   .description('Search across all nodes by text (semantic or FTS5)')
   .argument('<text>', 'Search text')
   .option('-n, --limit <n>', 'Max results', '20')
+  .option('--ceiling <n>', 'Max sensitivity level to include (0-3)', '1')
   .option('--no-semantic', 'Disable semantic search (use FTS5 instead)')
   .option('--db <path>', 'Path to graph.db')
   .action(async (text: string, opts) => {
     const graph = openGraph(opts.db);
     const limit = parseInt(opts.limit);
+    const ceiling = parseInt(opts.ceiling);
 
     // Try semantic search first if enabled
     if (opts.semantic !== false) {
       try {
         const queryVec = await getEmbedding(text);
         if (queryVec && queryVec.length > 0) {
-          const results = graph.semanticSearch(queryVec, limit);
+          const results = graph.semanticSearch(queryVec, limit, undefined, undefined, ceiling);
           if (results.length) {
             console.log(chalk.bold(`\nSemantic search: '${text}'`));
             const table = new Table({
@@ -422,7 +494,7 @@ program
               ]);
             }
             console.log(table.toString());
-            console.log(chalk.dim('Mode: semantic (sqlite-vec)'));
+            console.log(chalk.dim(`Mode: semantic (sqlite-vec) | ceiling: ${ceiling}`));
             graph.close();
             process.exit(0);
           }
