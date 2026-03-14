@@ -32,6 +32,20 @@ function getGraph(): KnowledgeGraph | null {
   return new KnowledgeGraph(DB_PATH);
 }
 
+/** Try to detect the agent name from environment or config. */
+function detectAgentName(): string | null {
+  // Check common env vars that agents set
+  const envName = process.env.COPILOT_AGENT_NAME || process.env.AGENT_NAME;
+  if (envName) return envName.toLowerCase();
+
+  // Check if the CWD or process title hints at an agent
+  const cwd = process.cwd();
+  const cwdMatch = cwd.match(/myelin-(\w+)\d*$/i);
+  if (cwdMatch) return cwdMatch[1].toLowerCase();
+
+  return null;
+}
+
 const session = await joinSession({
   onPermissionRequest: approveAll,
 
@@ -89,14 +103,16 @@ const session = await joinSession({
     },
 
     onSessionEnd: async (input: any, _invocation: any) => {
-      if (input.finalMessage && sessionAgent) {
-        try {
-          appendStructuredLog(sessionAgent, "handover", input.finalMessage.slice(0, 200), {
-            tags: ["auto-session-end"],
-          });
-        } catch {
-          // Silent
-        }
+      try {
+        const agent = sessionAgent || detectAgentName() || 'default';
+        const summary = input.finalMessage
+          ? input.finalMessage.slice(0, 200)
+          : 'Session ended (no final message)';
+        appendStructuredLog(agent, 'handover', summary, {
+          tags: ['auto-session-end'],
+        });
+      } catch {
+        // Silent
       }
     },
 
@@ -188,6 +204,7 @@ const session = await joinSession({
             enum: ["decision", "action", "finding", "error", "handover", "observation"],
           },
           summary: { type: "string", description: "One-line summary" },
+          detail: { type: "string", description: "Extended detail or context for richer log entries" },
           tags: { type: "string", description: "Comma-separated tags" },
         },
         required: ["agent", "type", "summary"],
@@ -195,7 +212,7 @@ const session = await joinSession({
       handler: async (args: any) => {
         try {
           const tags = args.tags ? args.tags.split(",").map((t: string) => t.trim()) : undefined;
-          appendStructuredLog(args.agent, args.type, args.summary, { tags });
+          appendStructuredLog(args.agent, args.type, args.summary, { tags, detail: args.detail });
           return `✅ ${args.agent}: ${args.summary}`;
         } catch (e: any) {
           return `Error: ${e.message}`;
