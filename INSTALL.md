@@ -1,178 +1,313 @@
 # Installing Myelin
 
-Myelin gives your Copilot CLI agents persistent, searchable memory across sessions. The primary integration is as a **Copilot CLI extension** — once installed, every agent automatically gets graph-backed tools and context injection.
+Myelin gives your Copilot CLI agents persistent, searchable memory across sessions. Install it once, and every agent automatically gets graph-backed tools, context injection, and session logging — no configuration required.
 
-## Quick Start (Copilot CLI Extension)
+**What you need:** Node.js >= 20 (22+ recommended). That's it for Tier 1.
 
-Three steps to give your agents memory:
+---
+
+## Tier 1: Get Started (5 minutes)
+
+Everything you need to give your agents memory. No extra models, no manual steps after install.
 
 ### 1. Install myelin
 
+**Option A — npm global install:**
 ```bash
 npm install -g github:shsolomo/myelin
 ```
 
-Compiles native dependencies (better-sqlite3, sqlite-vec, tree-sitter grammars). Requires Node.js >= 20 and C++ build tools.
-
-### Windows: Recommended Install (clone + link)
-
-On Windows, the global npm install (`npm install -g github:shsolomo/myelin`) can hit race conditions with Node 24. **The recommended approach for Windows is to clone and link locally:**
-
-```powershell
-# 1. Clone the repo
+**Option B — clone + link (recommended on Windows):**
+```bash
 git clone https://github.com/shsolomo/myelin.git
 cd myelin
-
-# 2. Install dependencies (--legacy-peer-deps resolves tree-sitter version conflicts)
 npm install --legacy-peer-deps
-
-# 3. Build
 npm run build
-
-# 4. Link globally (makes 'myelin' available as a command)
 npm link
 ```
 
-This separates the install/build/link phases and avoids the global-install race conditions entirely.
+> **Windows users:** Option A can hit race conditions with Node 24. Option B is more reliable. See [Troubleshooting → Windows install issues](#windows-npm-install--g-fails-issue-9) for details.
 
-**Why not `npm install -g`?** Three compounding issues on Windows + Node 24:
-1. **ENOTEMPTY**  npm's `.staging/` directory has rename race conditions during git dependency preparation
-2. **ENOENT cmd.exe**  native build scripts (better-sqlite3, tree-sitter) can fail to spawn `cmd.exe` when installed from PowerShell. If you must use global install, run from `cmd.exe` instead of PowerShell.
-3. **Peer dep conflict**  `tree-sitter-bicep` wants `tree-sitter ^0.22.1` but root has `^0.25.0`. Use `--legacy-peer-deps`.
-
-See [#9](https://github.com/shsolomo/myelin/issues/9) for full details.
-
-After linking, continue with steps 2 and 3 from Quick Start above (`myelin init` and `myelin setup-extension`).
-
-
-### 2. Initialize the graph
-
-```bash
-myelin init
-```
-
-Creates the knowledge graph at `~/.copilot/.working-memory/graph.db`.
-
-### 3. Install the extension
+### 2. Set up the extension
 
 ```bash
 myelin setup-extension
 ```
 
-Bundles myelin into `~/.copilot/extensions/myelin/extension.mjs`. Restart Copilot CLI or run `/clear` to load.
+This single command:
+- Initializes the graph database (`~/.copilot/.working-memory/graph.db`) if it doesn't exist
+- Bundles the extension into `~/.copilot/extensions/myelin/extension.mjs`
+- Installs native dependencies for the extension runtime
 
-**That's it.** Your agents now have:
+### 3. Restart Copilot CLI
+
+Start a new Copilot CLI session (or run `/clear`). The extension loads automatically.
+
+### What you get immediately
+
+**5 tools** available to every agent:
 
 | Tool | What it does |
 |------|-------------|
-| `myelin_query` | Semantic search over the knowledge graph |
+| `myelin_query` | Semantic + keyword search over the knowledge graph |
 | `myelin_boot` | Load agent-specific context at session start |
 | `myelin_log` | Log structured events (decision, finding, error, etc.) |
 | `myelin_show` | Inspect a node and its connections |
 | `myelin_stats` | Graph statistics and embedding coverage |
 
-Plus automatic lifecycle hooks:
-- **onSessionStart** — graph context injected before first message
-- **onUserPromptSubmitted** — relevant context added per message via semantic search
-- **onSessionEnd** — session summary auto-logged
-- **onErrorOccurred** — automatic retry on recoverable model errors
+**4 automatic hooks** (no agent action needed):
 
-## Feeding the Graph
+| Hook | What it does |
+|------|-------------|
+| `onSessionStart` | Auto-detects the agent and injects graph context |
+| `onUserPromptSubmitted` | Adds relevant context per message via search |
+| `onSessionEnd` | Auto-logs a session summary |
+| `onErrorOccurred` | Retries on recoverable model errors |
 
-The graph starts empty. Feed it with any combination of sources:
-
-### Code repos
+### 4. Index your code (optional but recommended)
 
 ```bash
-myelin parse ./path/to/repo
+myelin parse ./path/to/your-repo
 ```
 
-Tree-sitter AST parsing extracts classes, methods, interfaces, functions, and their relationships. Supports C#, TypeScript, Python, Go, JSON, YAML, Dockerfile, PowerShell, and Bicep.
+Extracts classes, methods, interfaces, functions, and their relationships using tree-sitter. Supports C#, TypeScript, JavaScript, Python, Go, JSON, YAML, Dockerfile, PowerShell, and Bicep.
 
-### Text documents (notes, meeting recaps, etc.)
+### 5. Verify everything works
+
+```bash
+myelin doctor
+```
+
+Shows a color-coded health report: ✅ pass, ⚠️ warning, ❌ fail — with actionable suggestions for anything that needs attention.
+
+**You're done.** Agents now have memory. Sessions are logged automatically, context is injected on start, and relevant knowledge surfaces per-message.
+
+---
+
+## Tier 2: Build Memory (10 minutes)
+
+Grow the knowledge graph from documents and agent activity. Still no extra models needed — NER and search use built-in fallbacks.
+
+### Ingest documents
 
 ```bash
 myelin ingest ./path/to/notes
 ```
 
-Chunks text files, runs zero-shot NER (GLiNER) to find entities, then uses sentence embeddings to classify relationships. Fully local — no API calls.
+Chunks text files, extracts entities (people, tools, decisions, projects), and creates relationship edges. Works with markdown, plain text, meeting recaps — any text content.
 
 Use `--fast` to skip embedding-based relationship classification (faster, proximity-only edges):
-
 ```bash
 myelin ingest ./path/to/notes --fast
 ```
 
-### IDEA vault (structured notes)
+### Agent logging
 
-If you use the IDEA method (Initiatives, Domains, Expertise, Archive):
+Agents log automatically via the extension's `onSessionEnd` hook. You can also log manually during sessions:
+
+```bash
+myelin agent log myagent finding "Auth uses JWT with 24h expiry" --tag security
+myelin agent log myagent decision "Switch from REST to gRPC for internal services" --tag architecture
+```
+
+Log types: `decision`, `action`, `finding`, `error`, `observation`, `handover`
+
+### Consolidate + embed
+
+```bash
+myelin sleep
+```
+
+One command does it all:
+1. Discovers all agents with logs
+2. Runs NREM consolidation (replays logs → extracts entities → scores salience → writes to graph)
+3. Runs REM refinement (global decay → pruning)
+4. Generates embeddings for all nodes (required for semantic search)
+
+### Schedule nightly maintenance
+
+Run `myelin sleep` on a schedule so memory consolidation happens automatically:
+
+**Linux/macOS (cron):**
+```bash
+# Edit crontab
+crontab -e
+# Add this line (runs at 2 AM daily)
+0 2 * * * /usr/local/bin/myelin sleep >> /tmp/myelin-sleep.log 2>&1
+```
+
+**Windows (Task Scheduler):**
+```powershell
+$action = New-ScheduledTaskAction -Execute "myelin" -Argument "sleep"
+$trigger = New-ScheduledTaskTrigger -Daily -At 2am
+Register-ScheduledTask -TaskName "Myelin Sleep" -Action $action -Trigger $trigger -Description "Nightly myelin consolidation"
+```
+
+---
+
+## Tier 3: Advanced
+
+Optional configuration for power users who want more control.
+
+### GLiNER for high-precision NER
+
+By default, entity extraction uses a regex/heuristic fallback. For significantly better NER accuracy, install the GLiNER ONNX model:
+
+```bash
+# Requires Python with pip
+pip install gliner onnx onnxruntime
+python scripts/export-gliner.py
+```
+
+This exports the model (~583MB) to `./models/gliner/`. If you installed myelin globally, copy it:
+
+```bash
+# macOS/Linux
+cp -r ./models/gliner $(npm root -g)/myelin/models/
+
+# Windows (PowerShell)
+Copy-Item -Recurse .\models\gliner (Join-Path (npm root -g) myelin\models\)
+```
+
+### IDEA vault indexing
+
+If you use the IDEA method (Initiatives, Domains, Expertise, Archive) for structured notes:
 
 ```bash
 myelin vault ./path/to/vault
 ```
 
-### Agent activity logs
+### NREM/REM phase control
+
+Run consolidation phases independently for more control:
 
 ```bash
-myelin agent log myagent finding "Auth uses JWT with 24h expiry" --tag security
+# NREM only — replay logs, extract entities, score salience
+myelin consolidate --agent myagent --phase nrem
+
+# Full consolidation for a specific agent
 myelin consolidate --agent myagent
 ```
 
-Consolidation runs the brain-inspired NREM cycle: replay logs, extract entities, score salience, transfer to graph.
+`myelin sleep` runs both phases for all agents. Use `myelin consolidate` when you want per-agent or per-phase control.
 
-### Generate embeddings
+### Decay tuning
 
-```bash
-myelin embed
-```
+The REM phase applies salience decay to age out stale knowledge. Nodes below the salience threshold AND older than the age cutoff are pruned. Both conditions must be met — active nodes are never removed regardless of age.
 
-Embeds all nodes using all-MiniLM-L6-v2 (384-dim vectors). First run downloads the model (~80MB). Required for semantic search in the extension.
+### Sensitivity ceilings
 
-## CLI Usage (standalone)
+Extension hooks apply default sensitivity ceilings to avoid injecting too much context. These are configurable in agent definitions.
 
-The `myelin` CLI works independently of the Copilot extension:
+### Visualization
 
 ```bash
-myelin stats                            # Node/edge counts, type distribution
-myelin query "your search term"         # Semantic search
-myelin show "entity name"               # Inspect node and connections
-myelin viz                              # Browser visualization
-myelin agent boot myagent               # Generate agent briefing
+myelin viz
 ```
 
-## Prerequisites
+Opens an interactive graph visualization in your browser. Use type checkboxes to toggle node types, the salience slider to filter by importance, and click nodes to highlight connections.
 
-- **Node.js** >= 20 (Node.js 22+ recommended)
-- **npm**
-- **C++ build tools** for native addons:
-  - Windows: Visual Studio Build Tools (Desktop C++ workload)
-  - macOS: Xcode Command Line Tools (`xcode-select --install`)
-  - Linux: `build-essential` package
-- **Python** >= 3.6 (required by node-gyp)
+Filter by category:
+```bash
+myelin viz --category knowledge
+myelin viz --category code
+```
+
+### Index multiple repos
+
+```bash
+myelin parse ./frontend --namespace repo:frontend
+myelin parse ./backend --namespace repo:backend
+myelin parse ./infra --namespace repo:infra
+myelin namespaces  # list all indexed namespaces
+```
+
+---
+
+## CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `myelin init` | Create the graph database (also done by `setup-extension`) |
+| `myelin setup-extension` | Bundle and install the Copilot CLI extension |
+| `myelin doctor` | Health check with actionable diagnostics |
+| `myelin parse <path>` | Index a code repo with tree-sitter |
+| `myelin ingest <path>` | Ingest text documents (NER + relationship extraction) |
+| `myelin vault <path>` | Index an IDEA vault |
+| `myelin sleep` | Full maintenance cycle (consolidate + embed all agents) |
+| `myelin consolidate` | Run consolidation for a specific agent |
+| `myelin embed` | Generate embeddings for semantic search |
+| `myelin query "<term>"` | Semantic search over the graph |
+| `myelin show "<name>"` | Inspect a node and its connections |
+| `myelin stats` | Node/edge counts and type distribution |
+| `myelin viz` | Interactive graph visualization in browser |
+| `myelin agent boot <name>` | Generate an agent briefing from the graph |
+| `myelin agent log <name> <type> "<msg>"` | Log a structured event |
+| `myelin agent log-show <name>` | View an agent's log entries |
+| `myelin agent instructions <name>` | Generate logging instructions for an agent definition |
+| `myelin namespaces` | List indexed namespaces |
+| `myelin update` | Update myelin to the latest version |
+
+---
 
 ## Optional: Install the Setup Skill
 
 Copy the `myelin-setup` skill so your agent can guide setup interactively:
 
 ```bash
-# Global (all repos)
+# macOS/Linux
 cp -r $(npm root -g)/myelin/skills/myelin-setup ~/.copilot/skills/myelin-setup
-```
 
-Windows:
-```powershell
+# Windows (PowerShell)
 Copy-Item -Recurse (Join-Path (npm root -g) myelin skills myelin-setup) "$env:USERPROFILE\.copilot\skills\myelin-setup"
 ```
 
 Then ask your agent: **"set up myelin for this project"**
 
+---
+
 ## Troubleshooting
+
+### First step: run `myelin doctor`
+
+```bash
+myelin doctor
+```
+
+This checks your graph database, schema, node counts, and embedding coverage. Follow any ⚠️ or ❌ recommendations before investigating further.
+
+### Common issues
+
+#### Graph is empty (0 nodes)
+You've initialized but haven't indexed anything yet. Run:
+```bash
+myelin parse ./your-repo          # for code
+myelin ingest ./your-notes        # for documents
+```
+
+#### No embeddings (semantic search not working)
+Embeddings are needed for semantic search. Run:
+```bash
+myelin sleep                      # consolidates + embeds everything
+# or just embeddings:
+myelin embed
+```
+The embedding model (all-MiniLM-L6-v2, ~80MB) downloads on first run and is cached at `~/.cache/huggingface/`.
+
+#### Extension not loaded
+1. Verify the extension exists: check for `~/.copilot/extensions/myelin/extension.mjs`
+2. Re-run `myelin setup-extension` if missing
+3. Restart Copilot CLI (not just `/clear` — a full restart)
+
+#### Extension fails with NODE_MODULE_VERSION mismatch
+The extension's native modules must match the Copilot CLI's Node.js version. Re-run `myelin setup-extension` to recompile.
 
 ### Windows: `npm install -g` fails (Issue [#9](https://github.com/shsolomo/myelin/issues/9))
 
-Three compounding issues affect `npm install -g github:shsolomo/myelin` on Windows + Node 24. **Use the [clone + link approach](#windows-recommended-install-clone--link) instead.**
+Three compounding issues affect `npm install -g github:shsolomo/myelin` on Windows + Node 24. **Use the [clone + link approach](#1-install-myelin) instead.**
 
-If you must use global install, here are the failure modes and workarounds:
+<details>
+<summary>Detailed failure modes and workarounds</summary>
 
 #### ENOTEMPTY race condition
 ```
@@ -181,13 +316,13 @@ npm error syscall rename
 npm error path C:\...\node_modules\.staging\...\types\utils
 ```
 **Cause**: npm's `.staging/` directory has rename race conditions during git dependency preparation on Windows.
-**Workaround**: Retry a few times, or use clone + link. There is no reliable fix within npm itself.
+**Workaround**: Retry a few times, or use clone + link.
 
 #### ENOENT cmd.exe from PowerShell
 ```
 { code: 'ENOENT', signal: undefined }
 ```
-**Cause**: npm's child process spawning doesn't inherit the correct PATH when running native build scripts from PowerShell for git dependencies.
+**Cause**: npm's child process spawning doesn't inherit the correct PATH when running native build scripts from PowerShell.
 **Workaround**: Run from `cmd.exe` instead of PowerShell:
 ```cmd
 cmd /c "npm install -g github:shsolomo/myelin --legacy-peer-deps"
@@ -198,52 +333,30 @@ cmd /c "npm install -g github:shsolomo/myelin --legacy-peer-deps"
 npm error ERESOLVE could not resolve
 npm error   peerOptional tree-sitter@"^0.22.1" from tree-sitter-bicep@1.1.0
 ```
-**Cause**: `tree-sitter-bicep` wants `tree-sitter ^0.22.1` but myelin uses `^0.25.0`.
-**Workaround**: The project includes `.npmrc` with `legacy-peer-deps=true`. If installing manually, add `--legacy-peer-deps`:
-```bash
-npm install --legacy-peer-deps
-```
+**Workaround**: The project includes `.npmrc` with `legacy-peer-deps=true`. If installing manually, add `--legacy-peer-deps`.
 
-### `npm install` fails with node-gyp errors
-Ensure C++ build tools and Python are installed. On Windows, run `npm install --global windows-build-tools` from an admin terminal.
+</details>
 
-### Extension fails with NODE_MODULE_VERSION mismatch
-The extension's native modules must match the Copilot CLI's Node.js version. Re-run `myelin setup-extension` to recompile.
+### Windows: tree-sitter native build warnings
 
-### GLiNER model not found
-The ONNX model (~583MB) is not included in the npm package — it must be exported locally on each machine:
+Tree-sitter grammars require C++ compilation. If some grammars fail to build, code parsing still works for most languages — only the specific grammar that failed will be unavailable. This is not a blocking issue.
 
-```bash
-pip install gliner onnx onnxruntime
-python scripts/export-gliner.py
-```
-
-If you installed globally, copy the exported model to the global install location:
-
-```bash
-# macOS/Linux
-cp -r ./models/gliner $(npm root -g)/myelin/models/
-
-# Windows (PowerShell)
-Copy-Item -Recurse .\models\gliner (Join-Path (npm root -g) myelin\models\)
-```
-
-As a workaround, use `--fast` to skip NER entirely (proximity-only edges):
-
-```bash
-myelin ingest ./path/to/notes --fast
-myelin consolidate --agent myagent --fast
-```
+**C++ build tools required:**
+- Windows: Visual Studio Build Tools (Desktop C++ workload)
+- macOS: Xcode Command Line Tools (`xcode-select --install`)
+- Linux: `build-essential` package
 
 ### Node.js 24: tree-sitter C++20 build failure
-Node.js 24's V8 headers require C++20, but tree-sitter@0.25.0 forces C++17. Myelin includes a postinstall script that patches this automatically. If you still see `C++20 or later required` errors, run:
+
+Node.js 24's V8 headers require C++20, but tree-sitter@0.25.0 forces C++17. Myelin includes a postinstall script that patches this automatically. If you still see `C++20 or later required` errors:
 
 ```bash
 npm rebuild
 ```
 
 ### Node.js 24 + Visual Studio 2026: node-gyp not recognized
-node-gyp does not yet recognize VS 2026 (internal version 18.x). Workaround: set the VS version manually:
+
+node-gyp does not yet recognize VS 2026 (internal version 18.x):
 
 ```powershell
 npm config set msvs_version 2022
@@ -251,6 +364,14 @@ npm config set msvs_version 2022
 
 Or if only VS 2026 is installed, patch node-gyp as described in [#7](https://github.com/shsolomo/myelin/issues/7).
 
-### Embedding model slow on first run
-The first call to `myelin embed` or `myelin ingest` downloads the all-MiniLM-L6-v2 model (~80MB). Subsequent runs use the cached model.
+### Re-index after graph corruption
+
+Logs are never deleted, so the graph can always be rebuilt from scratch:
+
+```bash
+rm ~/.copilot/.working-memory/graph.db      # delete corrupted DB
+myelin init                                  # create fresh DB
+myelin parse ./your-repo                     # re-index code
+myelin sleep                                 # replay all agent logs + embed
+```
 
