@@ -178,20 +178,6 @@ The REM phase applies salience decay to age out stale knowledge. Nodes below the
 
 Extension hooks apply default sensitivity ceilings to avoid injecting too much context. These are configurable in agent definitions.
 
-### Visualization
-
-```bash
-myelin viz
-```
-
-Opens an interactive graph visualization in your browser. Use type checkboxes to toggle node types, the salience slider to filter by importance, and click nodes to highlight connections.
-
-Filter by category:
-```bash
-myelin viz --category knowledge
-myelin viz --category code
-```
-
 ### Index multiple repos
 
 ```bash
@@ -219,7 +205,6 @@ myelin namespaces  # list all indexed namespaces
 | `myelin query "<term>"` | Semantic search over the graph |
 | `myelin show "<name>"` | Inspect a node and its connections |
 | `myelin stats` | Node/edge counts and type distribution |
-| `myelin viz` | Interactive graph visualization in browser |
 | `myelin agent boot <name>` | Generate an agent briefing from the graph |
 | `myelin agent log <name> <type> "<msg>"` | Log a structured event |
 | `myelin agent log-show <name>` | View an agent's log entries |

@@ -1288,31 +1288,6 @@ program
     graph.close();
   });
 
-// ── Visualization────────────────────────────────────────────────────────────
-
-program
-  .command('viz')
-  .description('Visualize the knowledge graph in the browser')
-  .option('--category <cat>', 'Filter by category (knowledge, code)')
-  .option('--type <type>', 'Filter by node type')
-  .option('--min-salience <n>', 'Minimum salience', parseFloat)
-  .option('--focus <name>', 'Focus on a specific node and its neighborhood')
-  .option('--depth <n>', 'Neighborhood depth for focus mode', parseInt, 2)
-  .option('--port <n>', 'HTTP port', parseInt)
-  .option('--db <path>', 'Path to graph.db')
-  .action(async (opts) => {
-    const { startVizServer } = await import('./viz.js');
-    await startVizServer({
-      dbPath: opts.db,
-      category: opts.category,
-      type: opts.type,
-      minSalience: opts.minSalience,
-      focus: opts.focus,
-      depth: opts.depth,
-      port: opts.port,
-    });
-  });
-
 // ── NER Extraction API ───────────────────────────────────────────────────────
 
 program

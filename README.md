@@ -33,7 +33,7 @@ Myelin gives AI agents persistent, searchable memory across sessions. It uses br
          5 Tools       4 Hooks      CLI Commands
          (query,       (auto-boot,  (parse, ingest,
           boot,         context,     sleep, query,
-          log...)       auto-log)    viz...)
+          log...)       auto-log)    embed...)
 ```
 
 ## Install
@@ -87,9 +87,6 @@ myelin query "how does authentication work"
 
 # Health check
 myelin doctor
-
-# Visualize in browser
-myelin viz
 ```
 
 ## Three Pipelines
@@ -155,7 +152,6 @@ GLiNER uses a DeBERTa v2 backbone + span classifier via ONNX Runtime. If unavail
 | `myelin nodes` | List nodes with filters |
 | `myelin pin <name>` | Pin a node (never decays) |
 | `myelin classify <name>` | Set sensitivity level on a node |
-| `myelin viz` | Interactive graph visualization in browser |
 | `myelin agent boot <name>` | Generate agent briefing from graph |
 | `myelin agent log <name> <type> <msg>` | Log structured event |
 | `myelin agent log-show <name>` | View agent's log entries |

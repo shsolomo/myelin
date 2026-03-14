@@ -147,11 +147,6 @@ Recommend scheduling `myelin sleep` nightly for ongoing maintenance.
    myelin agent boot <agent-name>
    ```
 
-5. **Visualize** the graph in browser (optional):
-   ```bash
-   myelin viz
-   ```
-
 ### Phase 5: Agent Integration
 
 The extension handles most integration automatically:
@@ -198,9 +193,6 @@ myelin sleep
 # Verify
 myelin doctor
 myelin query "cache performance"
-
-# Visualize
-myelin viz
 ```
 
 ### Index multiple repos
