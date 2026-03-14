@@ -168,6 +168,42 @@ Then ask your agent: **"set up myelin for this project"**
 
 ## Troubleshooting
 
+### Windows: `npm install -g` fails (Issue [#9](https://github.com/shsolomo/myelin/issues/9))
+
+Three compounding issues affect `npm install -g github:shsolomo/myelin` on Windows + Node 24. **Use the [clone + link approach](#windows-recommended-install-clone--link) instead.**
+
+If you must use global install, here are the failure modes and workarounds:
+
+#### ENOTEMPTY race condition
+```
+npm error code ENOTEMPTY
+npm error syscall rename
+npm error path C:\...\node_modules\.staging\...\types\utils
+```
+**Cause**: npm's `.staging/` directory has rename race conditions during git dependency preparation on Windows.
+**Workaround**: Retry a few times, or use clone + link. There is no reliable fix within npm itself.
+
+#### ENOENT cmd.exe from PowerShell
+```
+{ code: 'ENOENT', signal: undefined }
+```
+**Cause**: npm's child process spawning doesn't inherit the correct PATH when running native build scripts from PowerShell for git dependencies.
+**Workaround**: Run from `cmd.exe` instead of PowerShell:
+```cmd
+cmd /c "npm install -g github:shsolomo/myelin --legacy-peer-deps"
+```
+
+#### Peer dependency conflict (tree-sitter-bicep)
+```
+npm error ERESOLVE could not resolve
+npm error   peerOptional tree-sitter@"^0.22.1" from tree-sitter-bicep@1.1.0
+```
+**Cause**: `tree-sitter-bicep` wants `tree-sitter ^0.22.1` but myelin uses `^0.25.0`.
+**Workaround**: The project includes `.npmrc` with `legacy-peer-deps=true`. If installing manually, add `--legacy-peer-deps`:
+```bash
+npm install --legacy-peer-deps
+```
+
 ### `npm install` fails with node-gyp errors
 Ensure C++ build tools and Python are installed. On Windows, run `npm install --global windows-build-tools` from an admin terminal.
 
