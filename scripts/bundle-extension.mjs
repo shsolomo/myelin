@@ -10,10 +10,12 @@
 
 import { build } from "esbuild";
 import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
+const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf-8"));
 
 // Packages that need require() instead of import (native addons + Copilot SDK)
 const requirePackages = [
@@ -50,6 +52,9 @@ await build({
   format: "esm",
   outfile: join(root, "dist/extension/extension.mjs"),
   plugins: [requireExternals],
+  define: {
+    "__MYELIN_VERSION__": JSON.stringify(pkg.version),
+  },
   banner: {
     js: `
 import { createRequire as __createRequire } from "node:module";

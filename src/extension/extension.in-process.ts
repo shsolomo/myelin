@@ -10,9 +10,8 @@
  */
 
 import { homedir } from "node:os";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { KnowledgeGraph } from "../memory/graph.js";
@@ -22,7 +21,8 @@ import { getEmbedding } from "../memory/embeddings.js";
 
 const WORKING_MEMORY = join(homedir(), ".copilot", ".working-memory");
 const DB_PATH = join(WORKING_MEMORY, "graph.db");
-const MYELIN_VERSION = "0.3.1";
+declare const __MYELIN_VERSION__: string;
+const MYELIN_VERSION = __MYELIN_VERSION__;
 
 // Session-level agent identity — set when myelin_boot is called
 let sessionAgent: string | null = null;
@@ -61,21 +61,14 @@ function extractKeywords(prompt: string): string[] {
     .slice(0, 8);
 }
 
-/** Resolve the mind root (repo root) from the bundled extension location. */
-function getMindRoot(): string {
-  // At runtime (bundled), this file lives at .github/extensions/myelin/extension.mjs
-  // Go up: myelin/ → extensions/ → .github/ → repo root
-  const extensionDir = dirname(fileURLToPath(import.meta.url));
-  return join(extensionDir, "..", "..", "..");
-}
-
 /**
  * Ensure NREM and REM consolidation cron jobs exist.
  * Follows the same pattern as heartbeat's ensureHeartbeatJob — writes JSON
  * files into the cron extension's jobs directory.
  */
-function ensureMyelinConsolidation(mindRoot: string): { nremCreated: boolean; remCreated: boolean } {
-  const cronJobsDir = join(mindRoot, ".github", "extensions", "cron", "data", "jobs");
+function ensureMyelinConsolidation(): { nremCreated: boolean; remCreated: boolean } {
+  const copilotRoot = join(homedir(), ".copilot");
+  const cronJobsDir = join(copilotRoot, "extensions", "cron", "data", "jobs");
   const nremPath = join(cronJobsDir, "myelin-nrem.json");
   const remPath = join(cronJobsDir, "myelin-rem.json");
 
@@ -87,11 +80,11 @@ function ensureMyelinConsolidation(mindRoot: string): { nremCreated: boolean; re
     mkdirSync(cronJobsDir, { recursive: true });
     writeFileSync(nremPath, JSON.stringify({
       id: "myelin-nrem", name: "myelin-nrem", status: "enabled",
-      maxConcurrency: 1, createdAtUtc: now, createdFrom: mindRoot,
+      maxConcurrency: 1, createdAtUtc: now, createdFrom: copilotRoot,
       lastRunAtUtc: null, nextRunAtUtc: null,
       schedule: { type: "cron", expression: "0 */6 * * *", timezone: "America/New_York" },
       payload: { type: "command", command: "npx", arguments: "myelin sleep",
-                 workingDirectory: mindRoot, timeoutSeconds: 120 },
+                 workingDirectory: copilotRoot, timeoutSeconds: 120 },
       backoff: null,
     }, null, 2) + "\n", "utf-8");
     nremCreated = true;
@@ -101,11 +94,11 @@ function ensureMyelinConsolidation(mindRoot: string): { nremCreated: boolean; re
     mkdirSync(cronJobsDir, { recursive: true });
     writeFileSync(remPath, JSON.stringify({
       id: "myelin-rem", name: "myelin-rem", status: "enabled",
-      maxConcurrency: 1, createdAtUtc: now, createdFrom: mindRoot,
+      maxConcurrency: 1, createdAtUtc: now, createdFrom: copilotRoot,
       lastRunAtUtc: null, nextRunAtUtc: null,
       schedule: { type: "cron", expression: "0 3 * * *", timezone: "America/New_York" },
       payload: { type: "command", command: "npx", arguments: "myelin consolidate -p rem",
-                 workingDirectory: mindRoot, timeoutSeconds: 120 },
+                 workingDirectory: copilotRoot, timeoutSeconds: 120 },
       backoff: null,
     }, null, 2) + "\n", "utf-8");
     remCreated = true;
@@ -181,8 +174,7 @@ const session = await joinSession({
 
         // Ensure NREM/REM consolidation cron jobs exist
         try {
-          const mindRoot = getMindRoot();
-          const results = ensureMyelinConsolidation(mindRoot);
+          const results = ensureMyelinConsolidation();
           if (results.nremCreated || results.remCreated) {
             await session.log(`Consolidation cron jobs created: NREM=${results.nremCreated}, REM=${results.remCreated}`);
           }
