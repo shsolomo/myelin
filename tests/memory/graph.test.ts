@@ -533,6 +533,63 @@ describe('querySubgraph', () => {
 });
 
 // ---------------------------------------------------------------------------
+// querySubgraph traversal modes (PRUNE / SKIP)
+// ---------------------------------------------------------------------------
+
+describe('querySubgraph traversal modes', () => {
+  // Graph: A ---> B(sensitive) ---> C
+  //                                 ^-- reachable only through B
+  beforeEach(() => {
+    graph.addNode({ id: 'a', name: 'Node A', salience: 0.8, sensitivity: 0, sourceAgent: 'test' });
+    graph.addNode({ id: 'b', name: 'Node B', salience: 0.7, sensitivity: 3, sourceAgent: 'other' });
+    graph.addNode({ id: 'c', name: 'Node C', salience: 0.6, sensitivity: 0, sourceAgent: 'other' });
+    graph.addEdge({ sourceId: 'a', targetId: 'b', relationship: RelationshipType.RelatesTo });
+    graph.addEdge({ sourceId: 'b', targetId: 'c', relationship: RelationshipType.RelatesTo });
+  });
+
+  it('default mode is SKIP — excludes sensitive node but continues expansion', () => {
+    const sub = graph.querySubgraph({ agent: 'test', ceiling: 1, depth: 2 });
+    const ids = sub.nodes.map(n => n.id);
+    expect(ids).toContain('a');
+    expect(ids).not.toContain('b');
+    expect(ids).toContain('c');
+  });
+
+  it('PRUNE mode — excludes sensitive node AND stops expansion at that branch', () => {
+    const sub = graph.querySubgraph({ agent: 'test', ceiling: 1, depth: 2, traversalMode: 'prune' });
+    const ids = sub.nodes.map(n => n.id);
+    expect(ids).toContain('a');
+    expect(ids).not.toContain('b');
+    expect(ids).not.toContain('c');
+  });
+
+  it('SKIP mode — edges only between visible nodes', () => {
+    const sub = graph.querySubgraph({ agent: 'test', ceiling: 1, depth: 2, traversalMode: 'skip' });
+    // B is not visible, so no edge should reference B
+    for (const e of sub.edges) {
+      expect(e.sourceId).not.toBe('b');
+      expect(e.targetId).not.toBe('b');
+    }
+  });
+
+  it('no ceiling returns all nodes as before', () => {
+    const sub = graph.querySubgraph({ agent: 'test', depth: 2 });
+    const ids = sub.nodes.map(n => n.id);
+    expect(ids).toContain('a');
+    expect(ids).toContain('b');
+    expect(ids).toContain('c');
+  });
+
+  it('null sensitivity treated as level 0', () => {
+    graph.addNode({ id: 'd', name: 'Node D', salience: 0.5, sourceAgent: 'test' }); // no sensitivity set
+    graph.addEdge({ sourceId: 'a', targetId: 'd', relationship: RelationshipType.RelatesTo });
+    const sub = graph.querySubgraph({ agent: 'test', ceiling: 0, depth: 1 });
+    const ids = sub.nodes.map(n => n.id);
+    expect(ids).toContain('d');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Homeostatic Operations
 // ---------------------------------------------------------------------------
 

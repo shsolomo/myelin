@@ -90,6 +90,8 @@ export interface SubgraphFilters {
   minSalience?: number;
   depth?: number;
   limit?: number;
+  ceiling?: number;
+  traversalMode?: 'prune' | 'skip';
 }
 
 export interface GraphStats {
@@ -598,41 +600,64 @@ export class KnowledgeGraph {
       minSalience = 0.0,
       depth = 1,
       limit = 50,
+      ceiling,
+      traversalMode = 'skip',
     } = filters;
 
-    const nodes = this.findNodes({
+    const seedNodes = this.findNodes({
       sourceAgent: agent,
       tag,
       minSalience,
       limit,
+      ceiling,
     });
-    const nodeIds = new Set(nodes.map((n) => n.id));
 
-    // Expand by depth
+    const visited = new Set<string>();
+    const visibleIds = new Set<string>();
+    const nodes: Node[] = [];
+
+    for (const n of seedNodes) {
+      visited.add(n.id);
+      visibleIds.add(n.id);
+      nodes.push(n);
+    }
+
+    // BFS expansion with classification-aware traversal
     for (let d = 0; d < depth; d++) {
-      const newIds = new Set<string>();
-      for (const nid of nodeIds) {
+      const frontier = new Set<string>();
+      for (const nid of visited) {
+        // In PRUNE mode, only expand edges from visible (below-ceiling) nodes
+        if (ceiling !== undefined && traversalMode === 'prune' && !visibleIds.has(nid)) {
+          continue;
+        }
         for (const e of this.getEdges(nid)) {
-          newIds.add(e.sourceId);
-          newIds.add(e.targetId);
+          frontier.add(e.sourceId);
+          frontier.add(e.targetId);
         }
       }
-      for (const nid of newIds) {
-        if (!nodeIds.has(nid)) {
+      for (const nid of frontier) {
+        if (!visited.has(nid)) {
+          visited.add(nid);
           const node = this.getNode(nid);
           if (node && node.salience >= minSalience) {
-            nodes.push(node);
+            const nodeSensitivity = node.sensitivity ?? 0;
+            if (ceiling === undefined || nodeSensitivity <= ceiling) {
+              visibleIds.add(nid);
+              nodes.push(node);
+            }
+            // SKIP mode: node excluded from results but stays in visited for further expansion
+            // PRUNE mode: node excluded from results AND not in visibleIds, so edges won't expand
           }
-          nodeIds.add(nid);
         }
       }
     }
 
-    // Collect outgoing edges between nodes in the subgraph
+    // Collect outgoing edges between visible nodes only
     const edges: Edge[] = [];
-    for (const nid of nodeIds) {
+    for (const nid of visibleIds) {
       for (const e of this.getEdges(nid, 'outgoing')) {
-        if (nodeIds.has(e.targetId)) {
+        // V2: Check edge.sensitivity here
+        if (visibleIds.has(e.targetId)) {
           edges.push(e);
         }
       }
