@@ -7,6 +7,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import type { KnowledgeGraph, Node, Edge } from "./graph.js";
+import { NodeType } from "./graph.js";
 import type { LogEntry } from "./log-parser.js";
 import { parseLogFile, entriesSince } from "./log-parser.js";
 import { toLogEntries } from "./structured-log.js";
@@ -35,6 +36,75 @@ export interface REMResult {
   edgesPruned: number;
   associationsCreated: number;
   abstractionsMade: number;
+}
+
+// ── Auto-classification heuristics ────────────────────────────────────────
+
+const SOURCE_TAGS_LEVEL3 = ['1on1', '1:1', 'private', 'dm', 'direct-message'];
+const SOURCE_TAGS_LEVEL2 = ['confidential', 'strategy', 'sensitive', 'security'];
+const SOURCE_TAGS_LEVEL1 = ['observation', 'finding', 'internal'];
+
+/**
+ * Infer sensitivity level for a node based on two signals:
+ * 1. Source channel floor — derived from log entry tags/metadata
+ * 2. Entity type ceiling — derived from the node's entity type
+ *
+ * Final level = MAX(channelFloor, typeCeiling). Errs toward over-classification.
+ */
+export function inferSensitivity(
+  entry: LogEntry,
+  entityType: string,
+): { level: number; reason: string } {
+  // Signal 1: Source channel floor from tags/metadata
+  const tagsRaw = entry.metadata?.tags ?? '';
+  const tags = tagsRaw.toLowerCase().split(/[,\s]+/).filter(Boolean);
+  const entryContent = `${entry.heading} ${entry.content}`.toLowerCase();
+
+  let channelFloor = 0;
+  let channelReason = '';
+
+  if (SOURCE_TAGS_LEVEL3.some(t => tags.includes(t) || entryContent.includes(t))) {
+    channelFloor = 3;
+    channelReason = 'source:private/1on1/dm';
+  } else if (SOURCE_TAGS_LEVEL2.some(t => tags.includes(t) || entryContent.includes(t))) {
+    channelFloor = 2;
+    channelReason = 'source:confidential/strategy';
+  } else if (SOURCE_TAGS_LEVEL1.some(t => tags.includes(t) || entryContent.includes(t))) {
+    channelFloor = 1;
+    channelReason = 'source:observation/finding';
+  }
+
+  // Signal 2: Entity type ceiling
+  let typeCeiling = 0;
+  let typeReason = '';
+  const normalizedType = entityType.toLowerCase();
+
+  if (normalizedType === NodeType.Person) {
+    typeCeiling = 2;
+    typeReason = 'type:person';
+  } else if (normalizedType === NodeType.Decision || normalizedType === NodeType.Meeting) {
+    typeCeiling = 1;
+    typeReason = 'type:decision/meeting';
+  }
+
+  // MAX of both signals
+  if (channelFloor >= typeCeiling) {
+    return { level: channelFloor, reason: channelReason || 'source:public' };
+  }
+  return { level: typeCeiling, reason: typeReason };
+}
+
+/**
+ * Apply sensitivity classification to extracted nodes based on the source entry.
+ */
+function applySensitivity(extraction: { entities: Node[]; sourceEntry: LogEntry }): void {
+  for (const node of extraction.entities) {
+    const { level, reason } = inferSensitivity(extraction.sourceEntry, node.type);
+    if (level > 0) {
+      node.sensitivity = level;
+      node.sensitivityReason = reason;
+    }
+  }
 }
 
 /**
@@ -134,6 +204,7 @@ export async function nremReplay(
   if (options.llmExtractions) {
     for (const jsonText of options.llmExtractions) {
       const extraction = parseLlmExtraction(jsonText, agentName);
+      applySensitivity(extraction);
       result.entitiesExtracted += extraction.entities.length;
       result.relationshipsExtracted += extraction.relationships.length;
 
@@ -145,6 +216,7 @@ export async function nremReplay(
   } else {
     for (const entry of entries) {
       const extraction = await extractFromEntry(entry, agentName);
+      applySensitivity(extraction);
       result.entitiesExtracted += extraction.entities.length;
       result.relationshipsExtracted += extraction.relationships.length;
 

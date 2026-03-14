@@ -12,7 +12,7 @@ import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { KnowledgeGraph, NodeType, RelationshipType } from '../../src/memory/graph.js';
-import { remRefine, nremReplay, runFullCycle } from '../../src/memory/replay.js';
+import { remRefine, nremReplay, runFullCycle, inferSensitivity } from '../../src/memory/replay.js';
 
 // Mock NER so extractFromEntry uses regex fallback
 vi.mock('../../src/memory/ner.js', () => ({
@@ -230,5 +230,151 @@ describe('runFullCycle', () => {
     expect(rem.nodesPruned).toBe(1);
     expect(graph.getNode('fresh')).not.toBeNull();
     expect(graph.getNode('stale')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// inferSensitivity
+// ---------------------------------------------------------------------------
+
+function makeLogEntry(overrides: Partial<{ heading: string; content: string; entryType: string; tags: string }>): import('../../src/memory/log-parser.js').LogEntry {
+  const heading = overrides.heading ?? '';
+  const content = overrides.content ?? '';
+  const entryType = overrides.entryType ?? 'observation';
+  const metadata: Record<string, string> = {};
+  if (overrides.tags) metadata.tags = overrides.tags;
+  return {
+    date: '2025-12-01',
+    heading,
+    content,
+    entryType,
+    metadata,
+    get fullText() { return `${heading}\n${content}`; },
+  };
+}
+
+describe('inferSensitivity', () => {
+  it('returns level 3 for 1on1/private/dm tags', () => {
+    const entry = makeLogEntry({ tags: '1on1, feedback' });
+    const result = inferSensitivity(entry, 'concept');
+    expect(result.level).toBe(3);
+    expect(result.reason).toContain('source:private');
+  });
+
+  it('returns level 3 for dm tag', () => {
+    const entry = makeLogEntry({ tags: 'dm' });
+    expect(inferSensitivity(entry, 'concept').level).toBe(3);
+  });
+
+  it('returns level 2 for confidential/strategy tags', () => {
+    const entry = makeLogEntry({ tags: 'confidential' });
+    const result = inferSensitivity(entry, 'concept');
+    expect(result.level).toBe(2);
+    expect(result.reason).toContain('source:confidential');
+  });
+
+  it('returns level 1 for observation/finding tags', () => {
+    const entry = makeLogEntry({ tags: 'finding, review' });
+    const result = inferSensitivity(entry, 'concept');
+    expect(result.level).toBe(1);
+    expect(result.reason).toContain('source:observation');
+  });
+
+  it('returns level 0 for no sensitive tags', () => {
+    const entry = makeLogEntry({ tags: 'general, public' });
+    const result = inferSensitivity(entry, 'concept');
+    expect(result.level).toBe(0);
+  });
+
+  it('Person entity type gives level 2', () => {
+    const entry = makeLogEntry({});
+    const result = inferSensitivity(entry, 'person');
+    expect(result.level).toBe(2);
+    expect(result.reason).toContain('type:person');
+  });
+
+  it('Decision entity type gives level 1', () => {
+    const entry = makeLogEntry({});
+    const result = inferSensitivity(entry, 'decision');
+    expect(result.level).toBe(1);
+    expect(result.reason).toContain('type:decision');
+  });
+
+  it('Meeting entity type gives level 1', () => {
+    const entry = makeLogEntry({});
+    const result = inferSensitivity(entry, 'meeting');
+    expect(result.level).toBe(1);
+    expect(result.reason).toContain('type:decision/meeting');
+  });
+
+  it('takes MAX of source and entity signals', () => {
+    // source=1 (finding), entity=2 (person) → MAX=2
+    const entry = makeLogEntry({ tags: 'finding' });
+    const result = inferSensitivity(entry, 'person');
+    expect(result.level).toBe(2);
+    expect(result.reason).toContain('type:person');
+  });
+
+  it('source signal wins when higher', () => {
+    // source=3 (1on1), entity=1 (decision) → MAX=3
+    const entry = makeLogEntry({ tags: '1on1' });
+    const result = inferSensitivity(entry, 'decision');
+    expect(result.level).toBe(3);
+    expect(result.reason).toContain('source:private');
+  });
+
+  it('detects source signals from content when no tags', () => {
+    const entry = makeLogEntry({ heading: '1:1 with Ian', content: 'Private discussion' });
+    const result = inferSensitivity(entry, 'concept');
+    expect(result.level).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// NREM sensitivity integration
+// ---------------------------------------------------------------------------
+
+describe('nremReplay sensitivity integration', () => {
+  it('applies sensitivity to nodes created during NREM with private tags', async () => {
+    const logPath = join(TEST_DIR, 'sensitive.jsonl');
+    const entries = [
+      { ts: '2025-12-01T10:00:00Z', agent: 'test', type: 'observation', summary: 'Talked to Jane Smith about strategy', detail: '', sessionId: '', tags: ['1on1'], context: {} },
+    ];
+    writeFileSync(logPath, entries.map(e => JSON.stringify(e)).join('\n'), 'utf-8');
+
+    await nremReplay(graph, logPath, { agentName: 'test' });
+
+    // Find any nodes with sensitivity set
+    const nodes = graph.findNodes();
+    const sensitiveNodes = nodes.filter(n => (n.sensitivity ?? 0) > 0);
+    expect(sensitiveNodes.length).toBeGreaterThan(0);
+    expect(sensitiveNodes[0].sensitivityReason).toBeDefined();
+  });
+
+  it('applies sensitivity via LLM extraction path', async () => {
+    const logPath = join(TEST_DIR, 'llm-sensitive.jsonl');
+    const logEntries = [
+      { ts: '2025-12-01T10:00:00Z', agent: 'test', type: 'decision', summary: 'Confidential strategy discussion', detail: '', sessionId: '', tags: ['confidential'], context: {} },
+    ];
+    writeFileSync(logPath, logEntries.map(e => JSON.stringify(e)).join('\n'), 'utf-8');
+
+    const extraction = JSON.stringify({
+      entities: [
+        { id: 'secret-plan', type: 'decision', name: 'Secret Plan', salience: 0.8 },
+      ],
+      relationships: [],
+    });
+
+    await nremReplay(graph, logPath, {
+      agentName: 'test',
+      llmExtractions: [extraction],
+    });
+
+    const node = graph.getNode('secret-plan');
+    expect(node).not.toBeNull();
+    // LLM extraction path: sourceEntry is synthetic (no tags), so only entity type signal applies
+    // Decision type = level 1
+    expect(node!.sensitivity).toBe(1);
+    expect(node!.sensitivityReason).toContain('type:decision');
   });
 });
