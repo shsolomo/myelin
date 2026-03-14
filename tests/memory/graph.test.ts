@@ -651,6 +651,65 @@ describe('extendForCode', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Classification (sensitivity)
+// ---------------------------------------------------------------------------
+
+describe('extendForClassification', () => {
+  it('adds sensitivity columns to nodes', () => {
+    graph.extendForClassification();
+    const info = graph.db.pragma('table_info(nodes)') as Array<{ name: string }>;
+    const cols = info.map(r => r.name);
+    expect(cols).toContain('sensitivity');
+    expect(cols).toContain('sensitivity_reason');
+  });
+
+  it('adds sensitivity columns to edges', () => {
+    graph.extendForClassification();
+    const info = graph.db.pragma('table_info(edges)') as Array<{ name: string }>;
+    const cols = info.map(r => r.name);
+    expect(cols).toContain('sensitivity');
+    expect(cols).toContain('sensitivity_reason');
+  });
+
+  it('is idempotent', () => {
+    graph.extendForClassification();
+    expect(() => graph.extendForClassification()).not.toThrow();
+  });
+
+  it('allows setting sensitivity on addNode after extension', () => {
+    graph.extendForClassification();
+    const node = graph.addNode({
+      id: 'sensitive-node',
+      name: 'Secret Project',
+      sensitivity: 3,
+      sensitivityReason: 'contains credentials',
+    });
+    expect(node.sensitivity).toBe(3);
+    expect(node.sensitivityReason).toBe('contains credentials');
+
+    const retrieved = graph.getNode('sensitive-node');
+    expect(retrieved!.sensitivity).toBe(3);
+    expect(retrieved!.sensitivityReason).toBe('contains credentials');
+  });
+
+  it('allows updating sensitivity via updateNode', () => {
+    graph.extendForClassification();
+    graph.addNode({ id: 'n1', name: 'Node' });
+    graph.updateNode('n1', { sensitivity: 2, sensitivityReason: 'internal only' });
+    const node = graph.getNode('n1');
+    expect(node!.sensitivity).toBe(2);
+    expect(node!.sensitivityReason).toBe('internal only');
+  });
+
+  it('sensitivity defaults to 0 when not specified', () => {
+    graph.extendForClassification();
+    graph.addNode({ id: 'n1', name: 'Default Node' });
+    const row = graph.db.prepare('SELECT sensitivity FROM nodes WHERE id = ?').get('n1') as { sensitivity: number };
+    expect(row.sensitivity).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
