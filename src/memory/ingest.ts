@@ -3,7 +3,8 @@
  *
  * Architecture:
  *   1. Read any text file, chunk into ~500 char windows
- *   2. Run GLiNER (local ONNX) for entity extraction per chunk
+ *   2. Run GLiNER (local ONNX) for entity extraction per chunk,
+ *      or fall back to regex/keyword extraction when GLiNER unavailable
  *   3. For entity pairs in same chunk, classify relationship type using
  *      embedding similarity against prototype vectors
  *   4. Cross-document entity linking: same entity across files gets connected
@@ -11,7 +12,7 @@
  *
  * This is the "Tier 3+" approach: NER + embedding-based relationship
  * extraction, fully local. Uses only models already shipped with myelin:
- *   - GLiNER (onnxruntime-node) for NER
+ *   - GLiNER (onnxruntime-node) for NER (optional — degrades gracefully)
  *   - all-MiniLM-L6-v2 (@huggingface/transformers) for embeddings
  */
 
@@ -24,7 +25,7 @@ import {
   type Node,
   type Edge,
 } from './graph.js';
-import { RELATIONSHIP_PATTERNS, type RelationshipPattern } from './vocabulary.js';
+import { ENTITY_PATTERNS, RELATIONSHIP_PATTERNS, type RelationshipPattern } from './vocabulary.js';
 import { LABEL_TO_NODE_TYPE, nameToId, isLikelyPerson } from './extractors.js';
 import * as ner from './ner.js';
 import { getEmbedding, getEmbeddings, isAvailable as embeddingsAvailable } from './embeddings.js';
@@ -34,7 +35,7 @@ import { getEmbedding, getEmbeddings, isAvailable as embeddingsAvailable } from 
 /** Target chunk size in characters. Chunks split on paragraph boundaries. */
 const CHUNK_SIZE = 600;
 /** Minimum entities in a chunk to consider it graph-worthy. */
-const MIN_ENTITIES_PER_CHUNK = 2;
+const MIN_ENTITIES_PER_CHUNK = 1;
 /** Maximum character gap for co-occurrence edges when embeddings unavailable. */
 const MAX_PROXIMITY = 300;
 /** Cosine similarity threshold: below this, use generic RelatesTo. */
@@ -66,6 +67,7 @@ export interface IngestResult {
   nodesReinforced: number;
   edgesAdded: number;
   relationshipTypes: Record<string, number>;
+  usedFallback: boolean;
 }
 
 // ── Prototype embeddings for relationship classification ─────────────────────
@@ -375,13 +377,152 @@ function findTextFiles(dir: string): string[] {
   return files;
 }
 
+// ── Regex fallback extraction (when GLiNER unavailable) ──────────────────────
+
+/**
+ * Extract entities from a text chunk using regex and keyword matching.
+ * Adapted from extractors.ts extractWithRegex() for raw text (no LogEntry).
+ *
+ * Produces lower-quality results than GLiNER but ensures ingestion works
+ * for users who haven't installed the ONNX model.
+ */
+function extractWithRegexFallback(
+  chunkText: string,
+  chunkIndex: number,
+): ExtractedEntity[] {
+  const entities: ExtractedEntity[] = [];
+  const seenIds = new Set<string>();
+  const textLower = chunkText.toLowerCase();
+
+  // 1. Capitalized multi-word names → Person
+  const namePattern = /\b([A-Z][a-z]+ [A-Z][a-z]+)\b/g;
+  let match: RegExpExecArray | null;
+  while ((match = namePattern.exec(chunkText)) !== null) {
+    const name = match[1];
+    if (!isLikelyPerson(name)) continue;
+    const id = nameToId(name);
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+    entities.push({
+      id,
+      name,
+      type: NodeType.Person,
+      start: match.index,
+      end: match.index + name.length,
+      chunkIndex,
+    });
+  }
+
+  // 2. Known tool/technology keywords → Tool
+  const TOOL_KEYWORDS = [
+    'kubernetes', 'docker', 'terraform', 'ansible', 'jenkins', 'github',
+    'gitlab', 'azure', 'aws', 'gcp', 'redis', 'postgres', 'mongodb',
+    'graphql', 'webpack', 'vite', 'eslint', 'prettier', 'jest', 'vitest',
+    'typescript', 'python', 'rust', 'golang', 'nodejs', 'react', 'angular',
+    'vue', 'svelte', 'nextjs', 'express', 'fastapi', 'django', 'flask',
+    'sqlite', 'onnx', 'gliner', 'tree-sitter', 'copilot', 'myelin',
+    'bicep', 'powershell', 'bash', 'git', 'npm', 'pip', 'cargo',
+  ];
+  for (const kw of TOOL_KEYWORDS) {
+    const idx = textLower.indexOf(kw);
+    if (idx === -1) continue;
+    const originalCase = chunkText.slice(idx, idx + kw.length);
+    const id = nameToId(originalCase);
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+    entities.push({
+      id,
+      name: originalCase,
+      type: NodeType.Tool,
+      start: idx,
+      end: idx + kw.length,
+      chunkIndex,
+    });
+  }
+
+  // 3. Signal phrases → Decision / Bug / Pattern
+  const SIGNAL_PATTERNS: Array<{ pattern: RegExp; type: NodeType }> = [
+    { pattern: /\b(?:decided to|agreed on|chose|approved|settled on|going with)\b/i, type: NodeType.Decision },
+    { pattern: /\b(?:bug in|broken|crash(?:es|ed)?|regression|root cause|workaround for)\b/i, type: NodeType.Bug },
+    { pattern: /\b(?:pattern for|best practice|convention|anti-pattern|always use|never use)\b/i, type: NodeType.Pattern },
+  ];
+
+  for (const sp of SIGNAL_PATTERNS) {
+    const signalMatch = sp.pattern.exec(chunkText);
+    if (!signalMatch) continue;
+
+    // Extract a meaningful entity name from the text after the signal phrase
+    const afterSignal = chunkText.slice(signalMatch.index + signalMatch[0].length, signalMatch.index + signalMatch[0].length + 120);
+    const entityMatch = afterSignal.match(/^\s+(?:the\s+)?([A-Z][A-Za-z0-9 ]+?)(?:[.,;:\n]|$)/);
+    if (entityMatch) {
+      const name = entityMatch[1].trim().slice(0, 60);
+      if (name.length > 3) {
+        const id = nameToId(name);
+        if (!seenIds.has(id)) {
+          seenIds.add(id);
+          entities.push({
+            id,
+            name,
+            type: sp.type,
+            start: signalMatch.index,
+            end: signalMatch.index + signalMatch[0].length + entityMatch[0].length,
+            chunkIndex,
+          });
+        }
+      }
+    }
+  }
+
+  // 4. Keyword-based entity patterns from vocabulary (same as extractors.ts)
+  for (const pattern of ENTITY_PATTERNS) {
+    if (pattern.nodeType === NodeType.Person) continue; // Already handled above
+    for (const keyword of pattern.keywords) {
+      if (textLower.includes(keyword.toLowerCase())) {
+        const heading = extractChunkHeading(chunkText);
+        if (heading) {
+          const id = nameToId(heading);
+          if (!seenIds.has(id) && isValidEntity(heading, pattern.nodeType)) {
+            seenIds.add(id);
+            entities.push({
+              id,
+              name: heading,
+              type: pattern.nodeType,
+              start: 0,
+              end: heading.length,
+              chunkIndex,
+            });
+          }
+        }
+        break; // One match per pattern type per chunk
+      }
+    }
+  }
+
+  return entities;
+}
+
+/** Extract a heading-like label from a text chunk (first markdown heading or short first line). */
+function extractChunkHeading(text: string): string | null {
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    // Markdown heading
+    const headingMatch = line.match(/^#{1,4}\s+(.+)/);
+    if (headingMatch) return headingMatch[1].trim().slice(0, 60);
+    // Short informative first line (not a paragraph)
+    if (line.length > 5 && line.length < 80 && !line.startsWith('-') && !line.startsWith('*')) {
+      return line.slice(0, 60);
+    }
+  }
+  return null;
+}
+
 // ── Main ingest pipeline ─────────────────────────────────────────────────────
 
 /**
  * Ingest text files from a directory into the knowledge graph.
  *
  * Pipeline per chunk:
- *   1. GLiNER NER → entities
+ *   1. GLiNER NER → entities (or regex fallback when GLiNER unavailable)
  *   2. Filter garbage entities
  *   3. If < MIN_ENTITIES_PER_CHUNK, skip (not graph-worthy)
  *   4. For each entity pair, extract context between them
@@ -412,6 +553,7 @@ export async function ingestDirectory(
     nodesReinforced: 0,
     edgesAdded: 0,
     relationshipTypes: {},
+    usedFallback: false,
   };
 
   graph.extendForCode();
@@ -420,8 +562,8 @@ export async function ingestDirectory(
   const nerTest = await ner.extractEntities('test');
   const nerAvailable = ner.isAvailable();
   if (!nerAvailable) {
-    console.error('GLiNER NER model not available — cannot extract entities.');
-    return result;
+    console.log('⚠ GLiNER not found → using basic entity extraction. Install GLiNER for better results.');
+    result.usedFallback = true;
   }
 
   // Load relationship prototypes (embedding-based classification)
@@ -456,32 +598,42 @@ export async function ingestDirectory(
     for (const chunk of chunks) {
       result.chunksProcessed++;
 
-      // Step 1: NER extraction
-      const nerEntities = await ner.extractEntities(chunk.text);
-
-      // Step 2: Filter and deduplicate
+      // Step 1: Entity extraction — GLiNER if available, regex fallback otherwise
       const entities: ExtractedEntity[] = [];
       const seenIds = new Set<string>();
 
-      for (const ent of nerEntities) {
-        const nodeType = LABEL_TO_NODE_TYPE[ent.label];
-        if (nodeType === undefined) continue;
+      if (nerAvailable) {
+        const nerEntities = await ner.extractEntities(chunk.text);
 
-        const name = ent.text.trim();
-        if (!name || !isValidEntity(name, nodeType)) continue;
+        for (const ent of nerEntities) {
+          const nodeType = LABEL_TO_NODE_TYPE[ent.label];
+          if (nodeType === undefined) continue;
 
-        const id = nameToId(name);
-        if (seenIds.has(id)) continue;
-        seenIds.add(id);
+          const name = ent.text.trim();
+          if (!name || !isValidEntity(name, nodeType)) continue;
 
-        entities.push({
-          id,
-          name,
-          type: nodeType,
-          start: ent.start,
-          end: ent.end,
-          chunkIndex: result.chunksProcessed,
-        });
+          const id = nameToId(name);
+          if (seenIds.has(id)) continue;
+          seenIds.add(id);
+
+          entities.push({
+            id,
+            name,
+            type: nodeType,
+            start: ent.start,
+            end: ent.end,
+            chunkIndex: result.chunksProcessed,
+          });
+        }
+      } else {
+        // Regex fallback path
+        const fallbackEntities = extractWithRegexFallback(chunk.text, result.chunksProcessed);
+        for (const ent of fallbackEntities) {
+          if (!seenIds.has(ent.id)) {
+            seenIds.add(ent.id);
+            entities.push(ent);
+          }
+        }
       }
 
       // Step 3: Skip low-signal chunks
