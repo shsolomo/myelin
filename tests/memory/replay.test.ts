@@ -182,6 +182,29 @@ describe('nremReplay', () => {
     const result = await nremReplay(graph, logPath);
     expect(result.highSalienceEntries.length).toBeGreaterThan(0);
   });
+
+  it('honors explicit --log path for .jsonl files', async () => {
+    const customLogPath = join(TEST_DIR, 'custom-agent.jsonl');
+    const entries = [
+      { ts: '2025-12-01T10:00:00Z', agent: 'test-agent', type: 'finding', summary: 'Custom log entry one', detail: '', sessionId: '', tags: [], context: {} },
+      { ts: '2025-12-01T11:00:00Z', agent: 'test-agent', type: 'action', summary: 'Custom log entry two', detail: '', sessionId: '', tags: [], context: {} },
+    ];
+    writeFileSync(customLogPath, entries.map(e => JSON.stringify(e)).join('\n'), 'utf-8');
+
+    const extraction = JSON.stringify({
+      entities: [{ id: 'custom-entity', type: 'concept', name: 'Custom', salience: 0.8 }],
+      relationships: [],
+    });
+
+    const result = await nremReplay(graph, customLogPath, {
+      agentName: 'test-agent',
+      llmExtractions: [extraction],
+    });
+
+    expect(result.entriesProcessed).toBe(2);
+    expect(result.nodesAdded).toBe(1);
+    expect(graph.getNode('custom-entity')).not.toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

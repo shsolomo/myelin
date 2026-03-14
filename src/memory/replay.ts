@@ -9,7 +9,8 @@ import { readFileSync, existsSync } from "node:fs";
 import type { KnowledgeGraph, Node, Edge } from "./graph.js";
 import type { LogEntry } from "./log-parser.js";
 import { parseLogFile, entriesSince } from "./log-parser.js";
-import { readLogEntries, toLogEntries, logFilePath } from "./structured-log.js";
+import { toLogEntries } from "./structured-log.js";
+import type { StructuredLogEntry } from "./structured-log.js";
 import { extractFromEntry } from "./extractors.js";
 import {
   parseLlmExtraction,
@@ -54,11 +55,30 @@ export async function nremReplay(
   // Phase 1: REPLAY — Read log file
   if (logPath && existsSync(logPath)) {
     if (logPath.endsWith(".jsonl")) {
-      const structured = readLogEntries(
-        agentName,
-        options.sinceDate ? { sinceDate: options.sinceDate } : undefined,
-      );
-      entries.push(...toLogEntries(structured));
+      const raw = readFileSync(logPath, "utf-8").trim();
+      if (raw) {
+        const structured: StructuredLogEntry[] = [];
+        for (const line of raw.split("\n")) {
+          if (!line.trim()) continue;
+          const data = JSON.parse(line) as Record<string, unknown>;
+          structured.push({
+            ts: data.ts as string,
+            agent: (data.agent as string) ?? agentName,
+            type: data.type as string,
+            summary: data.summary as string,
+            detail: (data.detail as string) ?? "",
+            sessionId: (data.sessionId as string) ?? (data.session_id as string) ?? "",
+            tags: (data.tags as string[]) ?? [],
+            context: (data.context as Record<string, unknown>) ?? {},
+          });
+        }
+        if (options.sinceDate) {
+          const since = options.sinceDate;
+          entries.push(...toLogEntries(structured.filter(e => e.ts.slice(0, 10) >= since)));
+        } else {
+          entries.push(...toLogEntries(structured));
+        }
+      }
     } else {
       entries.push(...parseLogFile(logPath));
     }
