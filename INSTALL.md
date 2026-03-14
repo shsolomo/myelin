@@ -48,12 +48,11 @@ Start a new Copilot CLI session (or run `/clear`). The extension loads automatic
 | `myelin_show` | Inspect a node and its connections |
 | `myelin_stats` | Graph statistics and embedding coverage |
 
-**4 automatic hooks** (no agent action needed):
+**3 automatic hooks** (no agent action needed):
 
 | Hook | What it does |
 |------|-------------|
-| `onSessionStart` | Auto-detects the agent and injects graph context |
-| `onUserPromptSubmitted` | Adds relevant context per message via search |
+| `onSessionStart` | Auto-detects the agent and injects graph context + tool guidance |
 | `onSessionEnd` | Auto-logs a session summary |
 | `onErrorOccurred` | Retries on recoverable model errors |
 

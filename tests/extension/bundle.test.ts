@@ -44,10 +44,9 @@ describe("extension bundle", () => {
     }
   });
 
-  it("contains all 4 hook registration strings", () => {
+  it("contains all 3 hook registration strings", () => {
     for (const hook of [
       "onSessionStart",
-      "onUserPromptSubmitted",
       "onSessionEnd",
       "onErrorOccurred",
     ]) {

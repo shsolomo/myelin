@@ -1,6 +1,6 @@
 /**
  * Extension lifecycle hook tests — exercises the logic patterns
- * used by onSessionStart, onUserPromptSubmitted, onSessionEnd,
+ * used by onSessionStart, onSessionEnd,
  * and onErrorOccurred hooks.
  *
  * Tests import source modules directly (NOT the bundled extension).
@@ -309,9 +309,9 @@ describe('onSessionStart — session initialization logic', () => {
   });
 });
 
-// ─── onUserPromptSubmitted logic ─────────────────────────────────
+// ─── Graph search patterns (used by myelin_query) ───────────────
 
-describe('onUserPromptSubmitted — context injection', () => {
+describe('graph search patterns — FTS5 and sensitivity filtering', () => {
   let graph: KnowledgeGraph;
 
   beforeEach(() => {

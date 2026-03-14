@@ -5,8 +5,8 @@
  * It imports myelin's graph library directly — no subprocess spawning.
  *
  * Tools: myelin_query, myelin_boot, myelin_log, myelin_show, myelin_stats
- * Hooks: onSessionStart (boot prompt), onSessionEnd (auto-log),
- *        onUserPromptSubmitted (context injection), onErrorOccurred (resilience)
+ * Hooks: onSessionStart (boot prompt + tool guidance), onSessionEnd (auto-log),
+ *        onErrorOccurred (resilience)
  */
 
 import { homedir } from "node:os";
@@ -16,7 +16,6 @@ import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { KnowledgeGraph } from "../memory/graph.js";
 import { getBootContext, resolveAgent, appendStructuredLog } from "../memory/agents.js";
-import { readLogEntries } from "../memory/structured-log.js";
 import { getEmbedding } from "../memory/embeddings.js";
 
 const WORKING_MEMORY = join(homedir(), ".copilot", ".working-memory");
@@ -33,34 +32,6 @@ function getGraph(): KnowledgeGraph | null {
   return new KnowledgeGraph(DB_PATH);
 }
 
-// detectAgentName is now resolveAgent() in agents.ts — imported above
-
-const STOPWORDS = new Set([
-  "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
-  "have", "has", "had", "do", "does", "did", "will", "would", "could",
-  "should", "may", "might", "shall", "can", "need", "must",
-  "i", "me", "my", "we", "our", "you", "your", "he", "she", "it",
-  "they", "them", "their", "this", "that", "these", "those",
-  "in", "on", "at", "to", "for", "of", "with", "by", "from", "as",
-  "into", "about", "between", "through", "after", "before", "above",
-  "and", "or", "but", "not", "no", "nor", "so", "if", "then", "than",
-  "what", "which", "who", "whom", "how", "when", "where", "why",
-  "all", "each", "every", "both", "few", "more", "most", "some", "any",
-  "just", "also", "very", "too", "only", "still", "already", "even",
-  "here", "there", "up", "out", "over", "now", "get", "make", "like",
-  "know", "think", "see", "come", "go", "want", "use", "find", "tell",
-]);
-
-/** Extract meaningful keywords from a prompt for FTS5 search. */
-function extractKeywords(prompt: string): string[] {
-  return prompt
-    .toLowerCase()
-    .replace(/[^\w\s-]/g, " ")
-    .split(/\s+/)
-    .filter(w => w.length > 2 && !STOPWORDS.has(w))
-    .slice(0, 8);
-}
-
 
 const session = await joinSession({
   onPermissionRequest: approveAll,
@@ -68,7 +39,7 @@ const session = await joinSession({
   hooks: {
     onSessionStart: async (_input: any, _invocation: any) => {
       try {
-        await session.log(`Myelin v${MYELIN_VERSION} loaded — 5 tools, 4 hooks`);
+        await session.log(`Myelin v${MYELIN_VERSION} loaded — 5 tools, 3 hooks`);
 
         if (!existsSync(DB_PATH)) {
           await session.log("No graph database found. Run `myelin init` to create one.", { level: "warning" });
@@ -95,19 +66,33 @@ const session = await joinSession({
           contextParts.push(briefing);
         }
 
-        // Always include tool availability docs
+        // Tool guidance: when to use myelin vs other tools
         contextParts.push(
           "",
-          "## Myelin Tools Available",
-          "You have access to a persistent knowledge graph via Myelin tools:",
-          "- **myelin_query** — Semantic search across graph nodes",
-          "- **myelin_boot** — Load deeper agent-specific context (call with your agent name for richer results)",
-          "- **myelin_log** — Record decisions, findings, actions, and observations during your session",
-          "- **myelin_show** — Inspect a specific node and its connections",
-          "- **myelin_stats** — Show graph statistics",
+          "## Myelin — When to Use These Tools",
+          "",
+          "You have a persistent knowledge graph with extracted entities, relationships, and agent history.",
+          "Use myelin tools for **conceptual, historical, and cross-domain** questions. Use grep/glob/view for **textual and file-level** searches.",
+          "",
+          "| Question type | Use | Why |",
+          "|---|---|---|",
+          "| Find a specific string in code | `grep` | Exact text match, line-level results |",
+          "| Find a file by name/pattern | `glob` | Pattern matching on file paths |",
+          "| Read a known file | `view` | Direct file access |",
+          "| How does auth work? | `myelin_query` | Conceptual — finds relationships across code, docs, and agent history |",
+          "| What did we decide about caching? | `myelin_query` | Historical — past decisions logged by agents over time |",
+          "| Who worked on the API? | `myelin_query` | Cross-domain — connects people to code to decisions |",
+          "| What's this node connected to? | `myelin_show` | Graph exploration — follow edges and relationships |",
+          "",
+          "**Tool reference:**",
+          "- **myelin_query** — Search by meaning across all knowledge (code, people, decisions, patterns). Use for 'how', 'why', 'who', and conceptual questions.",
+          "- **myelin_boot** — Load agent-specific context. Call with your agent name for a richer domain briefing.",
+          "- **myelin_log** — Record important decisions, findings, errors, and observations. These feed future consolidation into the graph.",
+          "- **myelin_show** — Inspect a specific node and its connections. Use after finding a node via query to explore its edges.",
+          "- **myelin_stats** — Check graph health: node/edge counts, type distribution, embedding coverage.",
         );
 
-        // Health hints — brief actionable notes when things need attention
+        // Health hints
         const healthGraph = getGraph();
         if (healthGraph) {
           try {
@@ -139,62 +124,6 @@ const session = await joinSession({
       }
     },
 
-    onUserPromptSubmitted: async (input: any, _invocation: any) => {
-      try {
-        const graph = getGraph();
-        if (!graph) return;
-
-        try {
-          // Try semantic search first
-          let context: string | null = null;
-          let searchMethod = "semantic";
-
-          try {
-            const queryEmbedding = await getEmbedding(input.prompt);
-            if (queryEmbedding.length > 0) {
-              const results = graph.semanticSearch(queryEmbedding, 5, "knowledge", undefined, 2);
-              const relevant = results.filter((r: any) => r.distance < 1.2);
-              if (relevant.length > 0) {
-                context = relevant
-                  .map((r: any) => `- **${r.node.name}** (${r.node.type}): ${r.node.description?.slice(0, 150)}`)
-                  .join("\n");
-              }
-            }
-          } catch {
-            // Embedding unavailable — fall through to FTS5
-          }
-
-          // FTS5 fallback when semantic search yields nothing
-          if (!context) {
-            const keywords = extractKeywords(input.prompt);
-            if (keywords.length > 0) {
-              const ftsQuery = keywords.join(" OR ");
-              const nodes = graph.searchNodes(ftsQuery, 10)
-                .filter((n: any) => (n.sensitivity ?? 0) <= 2)
-                .slice(0, 5);
-              if (nodes.length > 0) {
-                searchMethod = "keyword";
-                context = nodes
-                  .map((n: any) => `- **${n.name}** (${n.type}): ${n.description?.slice(0, 150)}`)
-                  .join("\n");
-              }
-            }
-          }
-
-          if (!context) return;
-
-          await session.log(`Myelin context injected (${searchMethod} search)`);
-          return {
-            additionalContext: `## Relevant Graph Context (Myelin)\n${context}`,
-          };
-        } finally {
-          graph.close();
-        }
-      } catch {
-        // Silent — don't break the user's flow
-      }
-    },
-
     onSessionEnd: async (input: any, _invocation: any) => {
       try {
         const agent = sessionAgent || resolveAgent() || 'default';
@@ -220,7 +149,7 @@ const session = await joinSession({
     {
       name: "myelin_query",
       description:
-        "Search the knowledge graph semantically. Finds nodes by meaning, not just keywords.",
+        "Search the knowledge graph by meaning. Use for conceptual questions (how, why, who), past decisions, cross-domain relationships, and historical context. Prefer grep/glob for exact text or file searches in code.",
       parameters: {
         type: "object",
         properties: {
@@ -270,7 +199,7 @@ const session = await joinSession({
     {
       name: "myelin_boot",
       description:
-        "Load domain-specific knowledge from the graph for a named agent.",
+        "Load domain-specific knowledge from the graph for a named agent. Call once at session start with your agent name for a richer briefing than auto-boot provides.",
       parameters: {
         type: "object",
         properties: {
@@ -290,7 +219,7 @@ const session = await joinSession({
     {
       name: "myelin_log",
       description:
-        "Log a structured event to an agent's knowledge log.",
+        "Log a structured event to an agent's knowledge log. Use to record decisions, findings, errors, and observations worth remembering across sessions. These logs feed into consolidation — important events become graph knowledge.",
       parameters: {
         type: "object",
         properties: {
@@ -327,7 +256,7 @@ const session = await joinSession({
     },
     {
       name: "myelin_show",
-      description: "Show a knowledge graph node and its connections.",
+      description: "Show a knowledge graph node and its connections. Use after finding a node via myelin_query to explore its edges, related entities, and tags.",
       parameters: {
         type: "object",
         properties: {
@@ -368,7 +297,7 @@ const session = await joinSession({
     },
     {
       name: "myelin_stats",
-      description: "Show knowledge graph statistics.",
+      description: "Show knowledge graph statistics: node/edge counts, type distribution, and embedding coverage. Use to check graph health or verify indexing worked.",
       parameters: { type: "object", properties: {} },
       handler: async () => {
         const graph = getGraph();

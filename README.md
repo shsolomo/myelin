@@ -61,12 +61,11 @@ After setup, every Copilot CLI agent automatically gets:
 | `myelin_show` | Inspect a node and its connections |
 | `myelin_stats` | Graph statistics and embedding coverage |
 
-**4 lifecycle hooks** (automatic, no agent action needed):
+**3 lifecycle hooks** (automatic, no agent action needed):
 
 | Hook | What it does |
 |------|-------------|
-| `onSessionStart` | Auto-detects agent, injects graph context |
-| `onUserPromptSubmitted` | Surfaces relevant knowledge per message |
+| `onSessionStart` | Auto-detects agent, injects graph context + tool guidance |
 | `onSessionEnd` | Logs session summary automatically |
 | `onErrorOccurred` | Retries on recoverable model errors |
 
