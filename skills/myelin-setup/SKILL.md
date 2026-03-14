@@ -7,7 +7,7 @@ description: Set up Myelin knowledge graph memory for any project. Use when aske
 
 ## Purpose
 
-Guide users through installing and configuring Myelin — a knowledge graph memory system for AI agents. Covers three indexing modes: agent memory (structured logs → graph), code repos (tree-sitter AST → graph), and notes/documents (manual or log-based ingestion). After setup, agents get persistent memory via semantic search, auto-injected context, and graph-based briefings.
+Guide users through installing and configuring Myelin — a knowledge graph memory system for AI agents. After setup, agents get persistent memory via semantic search, auto-injected context, automatic session logging, and graph-based briefings. No manual boot or logging steps required — the extension handles it.
 
 ## Required Configuration
 
@@ -28,17 +28,28 @@ This skill works without any pre-existing configuration. During setup, it create
    ```
    Requires Node.js >= 20. Native addons (better-sqlite3, sqlite-vec) compile during install.
 
-3. Initialize the knowledge graph database:
+   **On Windows**, clone + link is more reliable:
    ```bash
-   myelin init
+   git clone https://github.com/shsolomo/myelin.git
+   cd myelin
+   npm install --legacy-peer-deps
+   npm run build
+   npm link
    ```
-   Creates `~/.copilot/.working-memory/graph.db` with full schema (nodes, edges, FTS5, triggers).
 
-4. Verify with:
+3. Set up the Copilot CLI extension (also initializes the graph database if needed):
    ```bash
-   myelin stats
+   myelin setup-extension
    ```
-   Should show 0 nodes, 0 edges on a fresh install.
+   This bundles the extension, creates the graph DB at `~/.copilot/.working-memory/graph.db`, and installs runtime dependencies.
+
+4. Restart Copilot CLI (or run `/clear`) to load the extension.
+
+5. Verify the installation:
+   ```bash
+   myelin doctor
+   ```
+   Should show ✅ for graph database, schema, and extension. Follow any ⚠️ or ❌ recommendations.
 
 ### Phase 2: Index Content
 
@@ -49,133 +60,127 @@ Ask the user what they want to index. There are three modes — any combination 
 Index source code with tree-sitter. Supports C#, TypeScript, JavaScript, Python, Go, YAML, JSON, Bicep, PowerShell, and Dockerfile.
 
 ```bash
-myelin code parse /path/to/repo
+myelin parse /path/to/repo
 ```
 
 Optional: specify a namespace to keep repos separate:
 ```bash
-myelin code parse /path/to/repo --namespace repo:my-project
+myelin parse /path/to/repo --namespace repo:my-project
 ```
 
 This creates `File`, `Class`, `Method`, `Interface`, `Function` nodes with `defines` and `contains` edges — the structural skeleton of the codebase.
 
-To list what namespaces exist after indexing:
+To list indexed namespaces:
 ```bash
-myelin code namespaces
+myelin namespaces
 ```
 
-#### Mode B: Agent Memory (Structured Logs)
+#### Mode B: Text Documents (Notes, Meeting Recaps, etc.)
 
-This is the primary memory pipeline. Agents log observations during sessions, then consolidation extracts entities and relationships into the graph.
-
-1. **Log events** (agents do this during normal work):
-   ```bash
-   myelin agent log <agent-name> <type> "<summary>" --tag <topic>
-   ```
-   Types: `decision`, `action`, `finding`, `error`, `observation`, `handover`
-
-2. **View logged events**:
-   ```bash
-   myelin agent log-show <agent-name>
-   ```
-
-3. **Consolidate** logs into the graph (NREM extracts entities, REM applies decay):
-   ```bash
-   myelin consolidate --agent <agent-name>
-   ```
-   This runs NER (GLiNER zero-shot) to extract people, tools, decisions, bugs, patterns, initiatives, and meetings from log text. Entities within 300 characters of each other get co-occurrence edges.
-
-#### Mode C: Notes / Documents
-
-For IDEA-method vaults or markdown note collections, there is no direct indexer yet. Two approaches:
-
-**Approach 1 — Manual node creation** for key concepts:
-```bash
-myelin add-node --type initiative --name "Project Alpha" --description "Q2 shipping goal" --salience 0.8
-```
-
-**Approach 2 — Log-based ingestion** (recommended): Create log entries summarizing key notes, then consolidate. This lets NER extract entities naturally:
-```bash
-myelin agent log <agent> finding "Project Alpha targets Q2 launch with React frontend and PostgreSQL backend" --tag project
-myelin consolidate --agent <agent> --phase nrem
-```
-
-### Phase 3: Embeddings
-
-Generate vector embeddings for semantic search (required for `myelin query` and the extension's per-message context injection):
+Ingest text files with entity extraction and relationship edges:
 
 ```bash
-myelin embed --category knowledge
+myelin ingest /path/to/notes
 ```
 
-For code nodes too:
+Uses NER (GLiNER if available, regex/heuristic fallback otherwise) to extract entities and create co-occurrence edges. No extra model setup required — the fallback works out of the box.
+
+Use `--fast` to skip embedding-based relationship classification (faster, proximity-only edges):
 ```bash
-myelin embed --category code
+myelin ingest /path/to/notes --fast
 ```
 
-The embedding model (all-MiniLM-L6-v2, ~80MB) downloads on first run and is cached at `~/.cache/huggingface/`.
+#### Mode C: IDEA Vault (Structured Notes)
+
+For IDEA-method vaults (Initiatives, Domains, Expertise, Archive):
+
+```bash
+myelin vault /path/to/vault
+```
+
+#### Mode D: Agent Memory (Structured Logs)
+
+Agents log automatically via the extension's lifecycle hooks — no manual logging setup needed. The extension:
+- Auto-detects the agent name on session start
+- Auto-injects graph context before the first message
+- Auto-logs a session summary on session end
+
+For agents that want to log additional structured events during sessions, they can use the `myelin_log` tool or the CLI:
+```bash
+myelin agent log <agent-name> <type> "<summary>" --tag <topic>
+```
+Types: `decision`, `action`, `finding`, `error`, `observation`, `handover`
+
+### Phase 3: Consolidate & Embed
+
+Run a full maintenance cycle to process agent logs and generate embeddings:
+
+```bash
+myelin sleep
+```
+
+This single command:
+1. Discovers all agents with logs
+2. Runs NREM consolidation (replay logs → extract entities → score salience → write to graph)
+3. Runs REM refinement (global decay → pruning)
+4. Generates embeddings for all nodes (required for semantic search)
+
+For per-agent or per-phase control:
+```bash
+myelin consolidate --agent <agent-name>              # consolidate one agent
+myelin consolidate --agent <agent-name> --phase nrem  # NREM only
+myelin embed                                          # embeddings only
+```
+
+Recommend scheduling `myelin sleep` nightly for ongoing maintenance.
 
 ### Phase 4: Verify
 
-1. **Check graph contents**:
+1. **Run diagnostics**:
    ```bash
-   myelin stats
-   myelin types
+   myelin doctor
    ```
 
-2. **Test semantic search**:
+2. **Check graph contents**:
+   ```bash
+   myelin stats
+   ```
+
+3. **Test semantic search**:
    ```bash
    myelin query "your search term here"
    ```
 
-3. **Test agent boot** (what agents see at session start):
+4. **Test agent boot** (what agents see at session start):
    ```bash
    myelin agent boot <agent-name>
    ```
 
-4. **Visualize** the graph in browser:
+5. **Visualize** the graph in browser (optional):
    ```bash
-   myelin viz --category knowledge
+   myelin viz
    ```
-   Type checkboxes let you toggle node types. Salience slider filters by importance. Click nodes to highlight connections.
 
-### Phase 5: Install Copilot Extension
+### Phase 5: Agent Integration
 
-This makes myelin tools available inside Copilot CLI sessions automatically:
+The extension handles most integration automatically:
+- **Auto-boot**: Graph context is injected on session start (no manual `myelin_boot` call needed)
+- **Auto-log**: Session summaries are logged on session end
+- **Per-message context**: Relevant knowledge is surfaced with each user message
 
-```bash
-myelin setup-extension
-```
-
-Then restart Copilot CLI or run `/clear` to load it.
-
-After reload, 5 tools are available to agents: `myelin_query`, `myelin_boot`, `myelin_log`, `myelin_show`, `myelin_stats`.
-
-Three auto-hooks fire without agent action:
-- `onSessionStart` — injects graph briefing
-- `onUserPromptSubmitted` — adds relevant context per message
-- `onSessionEnd` — auto-logs session summary
-
-### Phase 6: Agent Integration
-
-To make an agent use myelin memory, add these instructions to the agent's definition file:
-
-1. **Boot on start**: At session start, run `myelin agent boot <agent-name>` to load graph context.
-2. **Log during work**: Use `myelin agent log <agent-name> <type> "<summary>"` to record decisions, findings, and errors.
-3. **Consolidate periodically**: Run `myelin consolidate --agent <agent-name>` to transfer logs into the graph (typically nightly or weekly).
-
-To generate the exact logging instructions to paste into an agent definition:
+To customize an agent's interaction with myelin, add instructions to the agent's definition file:
 ```bash
 myelin agent instructions <agent-name>
 ```
 
+This generates logging instructions you can paste into the agent definition.
+
 ## Constraints
 
-- Do NOT delete log files. Consolidation reads logs but never removes them.
-- Do NOT run consolidation on agents with no log file — it exits gracefully but wastes time.
-- Do NOT skip `myelin embed` if the user wants semantic search — without embeddings, queries fall back to keyword-only FTS5.
-- The extension currently hardcodes "donna" for `onSessionStart` boot context. Other agents get tools but not auto-boot.
+- Do NOT delete log files. Consolidation reads logs but never removes them. Logs are the source of truth for graph rebuilds.
+- Do NOT skip `myelin sleep` (or `myelin embed`) if the user wants semantic search — without embeddings, queries fall back to keyword-only FTS5 search.
 - Native addon compilation requires a C++ toolchain (Visual Studio Build Tools on Windows, Xcode on macOS, build-essential on Linux).
+- If `myelin doctor` reports issues, address those before troubleshooting other problems.
 
 ## Examples
 
@@ -185,53 +190,44 @@ myelin agent instructions <agent-name>
 # Install
 npm install -g github:shsolomo/myelin
 
-# Initialize
-myelin init
+# Set up extension (auto-inits graph DB)
+myelin setup-extension
+
+# Restart Copilot CLI, then:
 
 # Index your codebase
-myelin code parse ./my-project
+myelin parse ./my-project
 
-# Start logging agent observations
-myelin agent log myagent decision "Use event-driven architecture for notifications" --tag architecture
-myelin agent log myagent finding "Redis cache hit rate is only 40% on cold starts" --tag performance
+# Ingest your notes
+myelin ingest ./my-notes
 
-# Consolidate logs into graph
-myelin consolidate --agent myagent
-
-# Generate embeddings
-myelin embed --category knowledge
+# Consolidate + embed
+myelin sleep
 
 # Verify
-myelin stats
+myelin doctor
 myelin query "cache performance"
-myelin agent boot myagent
 
 # Visualize
 myelin viz
-
-# Install extension for Copilot CLI
-myelin setup-extension
 ```
 
 ### Index multiple repos
 
 ```bash
-myelin code parse ./frontend --namespace repo:frontend
-myelin code parse ./backend --namespace repo:backend
-myelin code parse ./infra --namespace repo:infra
-myelin code namespaces  # shows all three
+myelin parse ./frontend --namespace repo:frontend
+myelin parse ./backend --namespace repo:backend
+myelin parse ./infra --namespace repo:infra
+myelin namespaces  # shows all three
 ```
 
 ### Re-index after graph corruption
 
-If `graph.db` gets corrupted, delete it and rebuild from logs + code:
+Logs are never deleted, so the graph can always be rebuilt:
 
 ```bash
 rm ~/.copilot/.working-memory/graph.db
 myelin init
-myelin code parse ./my-repo
-myelin consolidate --agent myagent
-myelin embed --category knowledge
+myelin parse ./my-repo
+myelin sleep
 ```
-
-Logs are never deleted, so the graph can always be rebuilt.
