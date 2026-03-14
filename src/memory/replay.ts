@@ -182,6 +182,7 @@ const MAX_BACKUPS = 3;
 /**
  * Create a timestamped backup of graph.db before consolidation writes.
  * Keeps the latest MAX_BACKUPS copies and removes older ones.
+ * @deprecated Use backupGraph(dbPath) for new code — supports date-dedup and time-based rotation.
  */
 export function backupDatabase(graph: KnowledgeGraph): string | null {
   const dbName = graph.db.name;
@@ -195,12 +196,12 @@ export function backupDatabase(graph: KnowledgeGraph): string | null {
   const backupPath = join(dir, backupName);
 
   copyFileSync(dbName, backupPath);
-  rotateBackups(dir, base);
+  rotateByCount(dir, base);
   return backupPath;
 }
 
-/** Keep only the latest MAX_BACKUPS backup files. */
-function rotateBackups(dir: string, dbBase: string): void {
+/** Keep only the latest MAX_BACKUPS backup files (legacy count-based rotation). */
+function rotateByCount(dir: string, dbBase: string): void {
   const prefix = `${dbBase}.backup-`;
   try {
     const backups = readdirSync(dir)
@@ -212,6 +213,100 @@ function rotateBackups(dir: string, dbBase: string): void {
       try { unlinkSync(join(dir, old.name)); } catch { /* best effort */ }
     }
   } catch { /* directory listing failed — skip rotation */ }
+}
+
+// ── Backup (v2 — date-dedup + time-based rotation) ─────────────────────
+
+/** Format a Date as YYYYMMDDHHmmss for backup filenames. */
+function formatBackupTimestamp(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
+    `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+  );
+}
+
+/** Parse a YYYYMMDDHHmmss timestamp from a backup filename suffix. */
+function parseBackupTimestamp(ts: string): Date | null {
+  if (ts.length < 14) return null;
+  const year = parseInt(ts.slice(0, 4), 10);
+  const month = parseInt(ts.slice(4, 6), 10) - 1;
+  const day = parseInt(ts.slice(6, 8), 10);
+  const hour = parseInt(ts.slice(8, 10), 10);
+  const minute = parseInt(ts.slice(10, 12), 10);
+  const second = parseInt(ts.slice(12, 14), 10);
+  const d = new Date(year, month, day, hour, minute, second);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Create a timestamped backup of graph.db before consolidation.
+ *
+ * Filename format: `{dbPath}.backup-{YYYYMMDDHHmmss}`
+ *
+ * Skips (returns null) when:
+ * - The database file doesn't exist (first run)
+ * - A backup with today's date already exists (at most one backup per day)
+ *
+ * @returns The backup file path, or null if skipped.
+ */
+export function backupGraph(dbPath: string): string | null {
+  if (!dbPath || !existsSync(dbPath)) return null;
+
+  const dir = dirname(dbPath);
+  const base = basename(dbPath);
+  const now = new Date();
+  const tsStr = formatBackupTimestamp(now);
+  const todayPrefix = tsStr.slice(0, 8); // YYYYMMDD
+
+  // Skip if a backup with today's date already exists
+  const prefix = `${base}.backup-`;
+  try {
+    const existing = readdirSync(dir).filter(f => f.startsWith(prefix));
+    if (existing.some(f => f.startsWith(`${prefix}${todayPrefix}`))) return null;
+  } catch { /* can't list directory — proceed with backup */ }
+
+  const backupPath = join(dir, `${prefix}${tsStr}`);
+  copyFileSync(dbPath, backupPath);
+  return backupPath;
+}
+
+/**
+ * Delete backup files older than maxAgeDays.
+ *
+ * Scans for files matching `{dbPath}.backup-{YYYYMMDDHHmmss}`, parses the
+ * embedded timestamp, and removes any whose age exceeds the threshold.
+ *
+ * @returns Count of deleted backup files.
+ */
+export function rotateBackups(dbPath: string, maxAgeDays: number = 7): number {
+  const dir = dirname(dbPath);
+  const base = basename(dbPath);
+  const prefix = `${base}.backup-`;
+  const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+
+  try {
+    const files = readdirSync(dir).filter(f => f.startsWith(prefix));
+    let deleted = 0;
+
+    for (const f of files) {
+      const tsStr = f.slice(prefix.length);
+      const ts = parseBackupTimestamp(tsStr);
+      if (!ts) continue; // skip files with unparseable timestamps (e.g. legacy ISO backups)
+
+      if (now - ts.getTime() > maxAgeMs) {
+        try {
+          unlinkSync(join(dir, f));
+          deleted++;
+        } catch { /* best effort */ }
+      }
+    }
+
+    return deleted;
+  } catch {
+    return 0;
+  }
 }
 
 // ── Integrity checks ─────────────────────────────────────────────────────
@@ -346,6 +441,12 @@ export async function nremReplay(
     }
   }
 
+  // Backup before graph writes
+  const dbName = graph.db.name;
+  if (dbName && dbName !== ':memory:') {
+    backupGraph(dbName);
+  }
+
   // Phase 2 & 3: EXTRACT + SCORE
   const namespace = `agent-${agentName}`;
 
@@ -408,6 +509,12 @@ export function remRefine(
     pruneMinAgeDays?: number;
   } = {},
 ): REMResult {
+  // Backup before graph writes
+  const dbName = graph.db.name;
+  if (dbName && dbName !== ':memory:') {
+    backupGraph(dbName);
+  }
+
   const decayRate = options.decayRate ?? 0.05;
   const pruneThreshold = options.pruneThreshold ?? 0.05;
   const pruneMinAgeDays = options.pruneMinAgeDays ?? 30;
@@ -415,6 +522,13 @@ export function remRefine(
   const nodesDecayed = graph.decayAll(decayRate);
   const nodesPruned = graph.prune(pruneThreshold, pruneMinAgeDays);
   const edgesPruned = pruneOrphanEdges(graph);
+
+  // Clean orphan embeddings (table may not exist)
+  try {
+    graph.db
+      .prepare('DELETE FROM node_embeddings WHERE node_id NOT IN (SELECT id FROM nodes)')
+      .run();
+  } catch { /* node_embeddings table might not exist */ }
 
   return {
     nodesDecayed,
@@ -440,6 +554,13 @@ export async function runFullCycle(
 ): Promise<{ nrem: NREMResult; rem: REMResult }> {
   const nrem = await nremReplay(graph, logPath, options);
   const rem = remRefine(graph, { decayRate: options.decayRate });
+
+  // Rotate old backups after successful consolidation
+  const dbName = graph.db.name;
+  if (dbName && dbName !== ':memory:') {
+    rotateBackups(dbName);
+  }
+
   return { nrem, rem };
 }
 
