@@ -15,7 +15,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { KnowledgeGraph } from "../memory/graph.js";
-import { getBootContext, appendStructuredLog } from "../memory/agents.js";
+import { getBootContext, resolveAgent, appendStructuredLog } from "../memory/agents.js";
 import { readLogEntries } from "../memory/structured-log.js";
 import { getEmbedding } from "../memory/embeddings.js";
 
@@ -32,19 +32,7 @@ function getGraph(): KnowledgeGraph | null {
   return new KnowledgeGraph(DB_PATH);
 }
 
-/** Try to detect the agent name from environment or config. */
-function detectAgentName(): string | null {
-  // Check common env vars that agents set
-  const envName = process.env.COPILOT_AGENT_NAME || process.env.AGENT_NAME;
-  if (envName) return envName.toLowerCase();
-
-  // Check if the CWD or process title hints at an agent
-  const cwd = process.cwd();
-  const cwdMatch = cwd.match(/myelin-(\w+)\d*$/i);
-  if (cwdMatch) return cwdMatch[1].toLowerCase();
-
-  return null;
-}
+// detectAgentName is now resolveAgent() in agents.ts — imported above
 
 const STOPWORDS = new Set([
   "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
@@ -85,13 +73,44 @@ const session = await joinSession({
           return;
         }
 
+        // Auto-detect agent name and boot graph context
+        const detectedAgent = resolveAgent();
+        if (detectedAgent) {
+          sessionAgent = detectedAgent;
+        }
+
+        let briefing: string;
+        try {
+          briefing = getBootContext(detectedAgent, { dbPath: DB_PATH });
+        } catch (bootErr: any) {
+          await session.log(`Graph boot failed: ${bootErr.message}`, { level: "warning" });
+          briefing = "";
+        }
+
+        const contextParts: string[] = [];
+
+        if (briefing) {
+          contextParts.push(briefing);
+        }
+
+        // Always include tool availability docs
+        contextParts.push(
+          "",
+          "## Myelin Tools Available",
+          "You have access to a persistent knowledge graph via Myelin tools:",
+          "- **myelin_query** — Semantic search across graph nodes",
+          "- **myelin_boot** — Load deeper agent-specific context (call with your agent name for richer results)",
+          "- **myelin_log** — Record decisions, findings, actions, and observations during your session",
+          "- **myelin_show** — Inspect a specific node and its connections",
+          "- **myelin_stats** — Show graph statistics",
+        );
+
+        await session.log(
+          `Auto-boot complete: agent=${detectedAgent ?? "generic"}, context injected`,
+        );
+
         return {
-          additionalContext: [
-            "## Myelin Knowledge Graph",
-            "You have access to a persistent knowledge graph via Myelin tools (myelin_query, myelin_boot, myelin_log, myelin_show, myelin_stats).",
-            "Call `myelin_boot` with your agent name as the first step to load your domain-specific context from the graph.",
-            "Use `myelin_log` to record important decisions, findings, and actions during your session.",
-          ].join("\n"),
+          additionalContext: contextParts.join("\n"),
         };
       } catch (e: any) {
         await session.log(`Myelin boot error: ${e.message}`, { level: "error" });
@@ -156,7 +175,7 @@ const session = await joinSession({
 
     onSessionEnd: async (input: any, _invocation: any) => {
       try {
-        const agent = sessionAgent || detectAgentName() || 'default';
+        const agent = sessionAgent || resolveAgent() || 'default';
         const summary = input.finalMessage
           ? input.finalMessage.slice(0, 200)
           : 'Session ended (no final message)';

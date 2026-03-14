@@ -23,53 +23,87 @@ const DEFAULT_DB = join(COPILOT_ROOT, ".working-memory", "graph.db");
  * Generate a domain briefing for an agent's boot sequence.
  * Queries graph for high-salience nodes relevant to this agent.
  */
+/**
+ * Try to detect the current agent name from environment variables or process context.
+ * Returns null if no agent can be determined.
+ */
+export function resolveAgent(): string | null {
+  // Check well-known env vars that agents set
+  const envName = process.env.COPILOT_AGENT_NAME || process.env.AGENT_NAME;
+  if (envName) return envName.toLowerCase();
+
+  // Check if CWD hints at an agent-specific worktree (e.g., myelin-cajal1)
+  const cwd = process.cwd();
+  const cwdMatch = cwd.match(/myelin-(\w+)\d*$/i);
+  if (cwdMatch) return cwdMatch[1].toLowerCase();
+
+  return null;
+}
+
 export function getBootContext(
-  agentName: string,
+  agentName?: string | null,
   options: { dbPath?: string; minSalience?: number; limit?: number } = {},
 ): string {
   const dbPath = options.dbPath ?? DEFAULT_DB;
   const minSalience = options.minSalience ?? 0.3;
   const limit = options.limit ?? 30;
+  const resolvedAgent = agentName || null;
 
   const graph = new KnowledgeGraph(dbPath);
   try {
-    // Get nodes this agent contributed
-    const ownNodes = graph.findNodes({
-      sourceAgent: agentName,
-      minSalience,
-      limit,
-      ceiling: 1,
-    });
+    let allNodes: Node[];
 
-    // Get nodes tagged with this agent's domain
-    const taggedNodes = graph.findNodes({
-      tag: agentName,
-      minSalience,
-      limit,
-      ceiling: 1,
-    });
+    if (resolvedAgent) {
+      // Agent-specific boot: nodes contributed by or tagged with this agent
+      const ownNodes = graph.findNodes({
+        sourceAgent: resolvedAgent,
+        minSalience,
+        limit,
+        ceiling: 1,
+      });
 
-    // Merge and deduplicate
-    const seen = new Set<string>();
-    const allNodes: Node[] = [];
-    for (const node of [...ownNodes, ...taggedNodes]) {
-      if (!seen.has(node.id)) {
-        seen.add(node.id);
-        allNodes.push(node);
+      const taggedNodes = graph.findNodes({
+        tag: resolvedAgent,
+        minSalience,
+        limit,
+        ceiling: 1,
+      });
+
+      // Merge and deduplicate
+      const seen = new Set<string>();
+      allNodes = [];
+      for (const node of [...ownNodes, ...taggedNodes]) {
+        if (!seen.has(node.id)) {
+          seen.add(node.id);
+          allNodes.push(node);
+        }
       }
+    } else {
+      // Generic boot: high-salience nodes across the entire graph
+      allNodes = graph.findNodes({
+        minSalience: Math.max(minSalience, 0.5),
+        limit,
+        ceiling: 1,
+      });
     }
 
     // Sort by salience descending, limit
     allNodes.sort((a, b) => b.salience - a.salience);
     const nodes = allNodes.slice(0, limit);
 
+    const label = resolvedAgent ?? "generic";
+
     if (nodes.length === 0) {
-      return `# Graph Briefing — ${agentName}\n\nNo graph nodes found for this agent yet. The graph will populate as consolidation cycles run.\n`;
+      const stats = graph.stats();
+      if (stats.nodeCount === 0) {
+        return `# Graph Briefing — ${label}\n\nNo graph nodes found yet. The graph will populate as consolidation cycles run.\n`;
+      }
+      return `# Graph Briefing — ${label}\n\nNo matching nodes above salience threshold. Graph has ${stats.nodeCount} nodes total.\n`;
     }
 
     const now = new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC";
     const lines: string[] = [
-      `# Graph Briefing — ${agentName}`,
+      `# Graph Briefing — ${label}`,
       `_Generated ${now}_`,
       `_${nodes.length} nodes, sorted by salience_`,
       "",
