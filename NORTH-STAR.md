@@ -135,3 +135,15 @@ If it fails 4-6, it needs redesign but the intent may be valid.
 | 2. Procedural Memory | THE differentiator | Knowledge that graduates to permanent memory |
 | 3. Intelligence | Smarter extraction & retrieval | Hybrid NER+LLM, perspective-aware queries |
 | 4. Scale | Multi-user & security | Remote graphs, sensitivity enforcement, audit |
+
+## Versioning
+
+- **Patch** (0.x.**Y**): Bug fixes, test additions, documentation updates. No user action needed — existing installs continue to work.
+- **Minor** (0.**X**.0): New features, removed features, changed install flow. Users should update and may need to re-run `myelin setup-extension`.
+- **Major** (**X**.0.0): Reserved for 1.0 — stable API guarantee, procedural memory graduation, and remote graph support.
+
+A release is cut when any of these are true:
+1. A **breaking change** shipped (command removed, behavior changed)
+2. The **install flow** changed (new downloads, new dependencies)
+3. A **major capability** landed that users are waiting for
+4. An **external dependency** was introduced (new model repo, new service)
