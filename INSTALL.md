@@ -12,21 +12,13 @@ Everything you need to give your agents memory. No extra models, no manual steps
 
 ### 1. Install myelin
 
-**Option A — npm global install:**
 ```bash
 npm install -g github:shsolomo/myelin
 ```
 
-**Option B — clone + link (recommended on Windows):**
-```bash
-git clone https://github.com/shsolomo/myelin.git
-cd myelin
-npm install --legacy-peer-deps
-npm run build
-npm link
-```
+Requires Node.js >= 20 (22+ recommended). Native addons (better-sqlite3, sqlite-vec) compile during install — a C++ toolchain is required (Visual Studio Build Tools on Windows, Xcode on macOS, `build-essential` on Linux).
 
-> **Windows users:** Option A can hit race conditions with Node 24. Option B is more reliable. See [Troubleshooting → Windows install issues](#windows-npm-install--g-fails-issue-9) for details.
+> **Tip:** Add `--legacy-peer-deps` if you see peer dependency conflicts with tree-sitter-bicep.
 
 ### 2. Set up the extension
 
@@ -87,7 +79,7 @@ Shows a color-coded health report: ✅ pass, ⚠️ warning, ❌ fail — with a
 
 ## Tier 2: Build Memory (10 minutes)
 
-Grow the knowledge graph from documents and agent activity. Still no extra models needed — NER and search use built-in fallbacks.
+Grow the knowledge graph from documents and agent activity.
 
 ### Ingest documents
 
@@ -273,13 +265,13 @@ myelin ingest ./your-notes        # for documents
 ```
 
 #### No embeddings (semantic search not working)
-Embeddings are needed for semantic search. Run:
+Embeddings are needed for semantic search. Both models download automatically during `myelin setup-extension`. If they didn't download (network issue), run:
 ```bash
 myelin sleep                      # consolidates + embeds everything
 # or just embeddings:
 myelin embed
 ```
-The embedding model (all-MiniLM-L6-v2, ~80MB) downloads on first run and is cached at `~/.cache/huggingface/`.
+The embedding model (all-MiniLM-L6-v2, ~80MB) downloads on first use and is cached at `~/.cache/huggingface/`.
 
 #### Extension not loaded
 1. Verify the extension exists: check for `~/.copilot/extensions/myelin/extension.mjs`
@@ -289,31 +281,12 @@ The embedding model (all-MiniLM-L6-v2, ~80MB) downloads on first run and is cach
 #### Extension fails with NODE_MODULE_VERSION mismatch
 The extension's native modules must match the Copilot CLI's Node.js version. Re-run `myelin setup-extension` to recompile.
 
-### Windows: `npm install -g` fails (Issue [#9](https://github.com/shsolomo/myelin/issues/9))
+### Troubleshooting `npm install -g`
 
-Three compounding issues affect `npm install -g github:shsolomo/myelin` on Windows + Node 24. **Use the [clone + link approach](#1-install-myelin) instead.**
+If `npm install -g github:shsolomo/myelin` fails, try these workarounds:
 
 <details>
-<summary>Detailed failure modes and workarounds</summary>
-
-#### ENOTEMPTY race condition
-```
-npm error code ENOTEMPTY
-npm error syscall rename
-npm error path C:\...\node_modules\.staging\...\types\utils
-```
-**Cause**: npm's `.staging/` directory has rename race conditions during git dependency preparation on Windows.
-**Workaround**: Retry a few times, or use clone + link.
-
-#### ENOENT cmd.exe from PowerShell
-```
-{ code: 'ENOENT', signal: undefined }
-```
-**Cause**: npm's child process spawning doesn't inherit the correct PATH when running native build scripts from PowerShell.
-**Workaround**: Run from `cmd.exe` instead of PowerShell:
-```cmd
-cmd /c "npm install -g github:shsolomo/myelin --legacy-peer-deps"
-```
+<summary>Common failure modes</summary>
 
 #### Peer dependency conflict (tree-sitter-bicep)
 ```
@@ -322,9 +295,27 @@ npm error   peerOptional tree-sitter@"^0.22.1" from tree-sitter-bicep@1.1.0
 ```
 **Workaround**: The project includes `.npmrc` with `legacy-peer-deps=true`. If installing manually, add `--legacy-peer-deps`.
 
+#### Native build failures
+Native addons (better-sqlite3, tree-sitter) require a C++ toolchain. If compilation fails:
+- **Windows**: Install Visual Studio Build Tools (Desktop C++ workload)
+- **macOS**: `xcode-select --install`
+- **Linux**: `sudo apt install build-essential`
+
+Then retry: `npm install -g github:shsolomo/myelin`
+
+#### Alternative: clone + link
+If the global install continues to fail, clone and link instead:
+```bash
+git clone https://github.com/shsolomo/myelin.git
+cd myelin
+npm install --legacy-peer-deps
+npm run build
+npm link
+```
+
 </details>
 
-### Windows: tree-sitter native build warnings
+### Tree-sitter native build warnings
 
 Tree-sitter grammars require C++ compilation. If some grammars fail to build, code parsing still works for most languages — only the specific grammar that failed will be unavailable. This is not a blocking issue.
 

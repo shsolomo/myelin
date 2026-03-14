@@ -26,22 +26,13 @@ This skill works without any pre-existing configuration. During setup, it create
    ```bash
    npm install -g github:shsolomo/myelin
    ```
-   Requires Node.js >= 20. Native addons (better-sqlite3, sqlite-vec) compile during install.
+   Requires Node.js >= 20. Native addons (better-sqlite3, sqlite-vec) compile during install — a C++ toolchain is required (Visual Studio Build Tools on Windows, Xcode on macOS, `build-essential` on Linux).
 
-   **On Windows**, clone + link is more reliable:
-   ```bash
-   git clone https://github.com/shsolomo/myelin.git
-   cd myelin
-   npm install --legacy-peer-deps
-   npm run build
-   npm link
-   ```
-
-3. Set up the Copilot CLI extension (also initializes the graph database if needed):
+3. Set up the Copilot CLI extension (also initializes the graph database and downloads models):
    ```bash
    myelin setup-extension
    ```
-   This bundles the extension, creates the graph DB at `~/.copilot/.working-memory/graph.db`, and installs runtime dependencies.
+   This bundles the extension, creates the graph DB at `~/.copilot/.working-memory/graph.db`, installs runtime dependencies, and downloads the GLiNER NER model + embedding model (~660MB one-time download).
 
 4. Restart Copilot CLI (or run `/clear`) to load the extension.
 
@@ -83,7 +74,7 @@ Ingest text files with entity extraction and relationship edges:
 myelin ingest /path/to/notes
 ```
 
-Uses NER (GLiNER if available, regex/heuristic fallback otherwise) to extract entities and create co-occurrence edges. No extra model setup required — the fallback works out of the box.
+Uses NER (GLiNER for high-precision zero-shot extraction, with regex/heuristic fallback if the model isn't available) to extract entities and create co-occurrence edges. GLiNER downloads automatically during `myelin setup-extension`.
 
 Use `--fast` to skip embedding-based relationship classification (faster, proximity-only edges):
 ```bash
@@ -190,7 +181,7 @@ This generates logging instructions you can paste into the agent definition.
 # Install
 npm install -g github:shsolomo/myelin
 
-# Set up extension (auto-inits graph DB)
+# Set up extension (auto-inits graph DB, downloads models)
 myelin setup-extension
 
 # Restart Copilot CLI, then:
