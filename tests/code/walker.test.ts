@@ -119,9 +119,21 @@ describe('walkRepo', () => {
     createFile('e.ps1');
     const files = walkRepo(TEST_DIR);
     expect(files.find(f => f.filePath.includes('a.ts'))?.language).toBe('typescript');
-    expect(files.find(f => f.filePath.includes('b.tsx'))?.language).toBe('typescript');
+    expect(files.find(f => f.filePath.includes('b.tsx'))?.language).toBe('tsx');
     expect(files.find(f => f.filePath.includes('c.js'))?.language).toBe('javascript');
     expect(files.find(f => f.filePath.includes('d.jsx'))?.language).toBe('javascript');
     expect(files.find(f => f.filePath.includes('e.ps1'))?.language).toBe('powershell');
+  });
+
+  it('routes .tsx files to tsx language, not typescript', () => {
+    createFile('src/App.tsx');
+    createFile('src/index.ts');
+    const files = walkRepo(TEST_DIR);
+    const tsxFile = files.find(f => f.filePath.includes('App.tsx'));
+    const tsFile = files.find(f => f.filePath.includes('index.ts'));
+    expect(tsxFile).toBeDefined();
+    expect(tsxFile!.language).toBe('tsx');
+    expect(tsFile).toBeDefined();
+    expect(tsFile!.language).toBe('typescript');
   });
 });

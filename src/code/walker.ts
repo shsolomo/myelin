@@ -10,7 +10,7 @@ import { join, extname, basename } from 'node:path';
 const EXTENSION_MAP: Record<string, string> = {
   '.cs': 'csharp',
   '.ts': 'typescript',
-  '.tsx': 'typescript',
+  '.tsx': 'tsx',
   '.js': 'javascript',
   '.jsx': 'javascript',
   '.py': 'python',

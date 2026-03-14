@@ -41,8 +41,39 @@ describe('getParser', () => {
     expect(getParser('csharp')).not.toBeNull();
   });
 
+  it('returns parser for tsx', () => {
+    expect(getParser('tsx')).not.toBeNull();
+  });
+
   it('returns null for unknown language', () => {
     expect(getParser('brainfuck')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TSX parser
+// ---------------------------------------------------------------------------
+
+describe('TSX parser', () => {
+  const parser = getParser('tsx')!;
+
+  it('extracts component from TSX file', () => {
+    const source = `
+import React from 'react';
+
+interface Props {
+  name: string;
+}
+
+export function Greeting({ name }: Props): JSX.Element {
+  return <div>Hello, {name}!</div>;
+}
+`;
+    const result = parser.parseFile('src/Greeting.tsx', Buffer.from(source), 'src/Greeting.tsx');
+    expect(result.language).toBe('tsx');
+    const func = result.entities.find(e => e.name === 'Greeting');
+    expect(func).toBeDefined();
+    expect(func!.entityType).toBe('function');
   });
 });
 
