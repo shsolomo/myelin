@@ -31,6 +31,7 @@ import { getEmbedding, embedAllNodes } from './memory/embeddings.js';
 import { parseLlmExtraction, loadExtractionToGraph } from './memory/extractors.js';
 import { scoreEntry } from './memory/salience.js';
 import { getLlmExtractionPrompt } from './memory/vocabulary.js';
+import { migrateHeartbeatToGraph } from './memory/heartbeat-migration.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -1128,6 +1129,39 @@ program
     console.log('   onSessionStart          — graph context injected automatically');
     console.log('   onUserPromptSubmitted   — relevant context on every message');
     console.log('   onSessionEnd            — session summary auto-logged');
+  });
+
+// ── Heartbeat migration ─────────────────────────────────────────────────────
+
+program
+  .command('migrate-heartbeat')
+  .description('Import GENESIS heartbeat memory.md entries into the knowledge graph')
+  .argument('<path>', 'Path to memory.md file')
+  .option('--db <path>', 'Path to graph.db', DEFAULT_DB)
+  .option('--agent <name>', 'Source agent name', 'heartbeat-migration')
+  .option('--namespace <ns>', 'Namespace tag', 'heartbeat')
+  .action((filePath: string, opts: { db: string; agent: string; namespace: string }) => {
+    if (!existsSync(filePath)) {
+      console.error(chalk.red(`File not found: ${filePath}`));
+      process.exit(1);
+    }
+
+    const content = readFileSync(filePath, 'utf-8');
+    const graph = openGraph(opts.db);
+
+    const result = migrateHeartbeatToGraph(graph, content, {
+      sourceAgent: opts.agent,
+      namespace: opts.namespace,
+    });
+
+    console.log(chalk.green(`✅ Imported ${result.imported} entries`));
+    if (result.skipped > 0) {
+      console.log(chalk.yellow(`   Skipped ${result.skipped} duplicates`));
+    }
+    console.log(`   Total entries parsed: ${result.entries.length}`);
+
+    graph.close();
+    process.exit(0);
   });
 
 // ── Update ───────────────────────────────────────────────────────────────────
