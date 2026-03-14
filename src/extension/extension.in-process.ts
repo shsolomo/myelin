@@ -183,6 +183,7 @@ const session = await joinSession({
         properties: {
           query: { type: "string", description: "Natural language search query" },
           limit: { type: "number", description: "Max results (default: 10)" },
+          ceiling: { type: "number", description: "Max sensitivity level 0-3 (default: 1). Filters out nodes above this level." },
         },
         required: ["query"],
       },
@@ -192,26 +193,29 @@ const session = await joinSession({
 
         try {
           const limit = args.limit || 10;
+          const ceiling = args.ceiling ?? 1;
 
           // Try semantic search first
           const queryEmbedding = await getEmbedding(args.query);
           if (queryEmbedding.length > 0) {
-            const results = graph.semanticSearch(queryEmbedding, limit);
+            const results = graph.semanticSearch(queryEmbedding, limit, undefined, undefined, ceiling);
             if (results.length > 0) {
               const lines = results.map((r: any) =>
                 `[${r.distance.toFixed(3)}] ${r.node.type} | ${r.node.name} (${r.node.salience.toFixed(2)}) — ${r.node.description?.slice(0, 100)}`
               );
-              return `Semantic search: '${args.query}'\n${lines.join("\n")}`;
+              return `Semantic search: '${args.query}' (ceiling=${ceiling})\n${lines.join("\n")}`;
             }
           }
 
-          // Fallback to FTS5
-          const nodes = graph.searchNodes(args.query, limit);
+          // Fallback to FTS5 with client-side ceiling filter
+          const nodes = graph.searchNodes(args.query, limit * 2)
+            .filter((n: any) => (n.sensitivity ?? 0) <= ceiling)
+            .slice(0, limit);
           if (nodes.length === 0) return `No results for '${args.query}'`;
           const lines = nodes.map((n: any) =>
             `${n.type} | ${n.name} (${n.salience.toFixed(2)}) — ${n.description?.slice(0, 100)}`
           );
-          return `FTS5 search: '${args.query}'\n${lines.join("\n")}`;
+          return `FTS5 search: '${args.query}' (ceiling=${ceiling})\n${lines.join("\n")}`;
         } catch (e: any) {
           await session.log(`myelin_query error: ${e.message}`, { level: "error" });
           return `Error: ${e.message}`;
@@ -256,13 +260,22 @@ const session = await joinSession({
           summary: { type: "string", description: "One-line summary" },
           detail: { type: "string", description: "Extended detail or context for richer log entries" },
           tags: { type: "string", description: "Comma-separated tags" },
+          sensitivity: { type: "number", description: "Sensitivity level 0-3 (default: 0). Controls visibility during consolidation." },
+          sensitivity_reason: { type: "string", description: "Why this entry has elevated sensitivity (e.g., 'contains credentials', 'internal architecture')" },
         },
         required: ["agent", "type", "summary"],
       },
       handler: async (args: any) => {
         try {
           const tags = args.tags ? args.tags.split(",").map((t: string) => t.trim()) : undefined;
-          appendStructuredLog(args.agent, args.type, args.summary, { tags, detail: args.detail });
+          const context: Record<string, unknown> = {};
+          if (args.sensitivity !== undefined) context.sensitivity = args.sensitivity;
+          if (args.sensitivity_reason) context.sensitivityReason = args.sensitivity_reason;
+          appendStructuredLog(args.agent, args.type, args.summary, {
+            tags,
+            detail: args.detail,
+            context: Object.keys(context).length > 0 ? context : undefined,
+          });
           return `✅ ${args.agent}: ${args.summary}`;
         } catch (e: any) {
           return `Error: ${e.message}`;
