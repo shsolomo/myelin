@@ -105,6 +105,26 @@ const session = await joinSession({
           "- **myelin_stats** — Show graph statistics",
         );
 
+        // Health hints — brief actionable notes when things need attention
+        const healthGraph = getGraph();
+        if (healthGraph) {
+          try {
+            const healthStats = healthGraph.stats();
+            if (healthStats.nodeCount === 0) {
+              contextParts.push("", "💡 Graph is empty — run `myelin parse ./your-repo` to index code");
+            } else {
+              const embStats = healthGraph.embeddingStats();
+              if (!embStats.vecAvailable || embStats.embeddedNodes === 0) {
+                contextParts.push("", "💡 No embeddings — run `myelin embed` for semantic search");
+              }
+            }
+          } catch {
+            // Silent — don't break boot for health check
+          } finally {
+            healthGraph.close();
+          }
+        }
+
         await session.log(
           `Auto-boot complete: agent=${detectedAgent ?? "generic"}, context injected`,
         );

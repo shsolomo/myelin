@@ -1212,6 +1212,141 @@ program
     console.log('   onSessionEnd            — session summary auto-logged');
   });
 
+// ── Doctor ───────────────────────────────────────────────────────────────────
+
+program
+  .command('doctor')
+  .description('Check myelin health and report actionable diagnostics')
+  .option('--db <path>', 'Path to graph.db')
+  .action((opts: { db?: string }) => {
+    const pass = (msg: string) => console.log(chalk.green(`  ✅ ${msg}`));
+    const warn = (msg: string) => console.log(chalk.yellow(`  ⚠️  ${msg}`));
+    const fail = (msg: string) => console.log(chalk.red(`  ❌ ${msg}`));
+
+    console.log(chalk.cyan.bold('\n🩺 Myelin Doctor\n'));
+    const issues: string[] = [];
+
+    // 1. Graph DB
+    const dbPath = opts.db || DEFAULT_DB;
+    if (!existsSync(dbPath)) {
+      fail(`Graph DB not found at ${dbPath}`);
+      issues.push("Run 'myelin init' to create the graph database");
+    } else {
+      pass(`Graph DB exists: ${dbPath}`);
+
+      try {
+        const graph = new KnowledgeGraph(dbPath);
+        try {
+          // 2. Node count
+          const stats = graph.stats();
+          if (stats.nodeCount === 0) {
+            warn("Graph empty — run 'myelin parse ./your-repo' to index code");
+            issues.push("Run 'myelin parse ./your-repo' to index code");
+          } else {
+            pass(`Nodes: ${stats.nodeCount}`);
+          }
+
+          // 3. Edge count
+          if (stats.edgeCount === 0 && stats.nodeCount > 0) {
+            warn('No edges — graph has nodes but no relationships');
+          } else {
+            pass(`Edges: ${stats.edgeCount}`);
+          }
+
+          // 4. Embedding coverage
+          const embStats = graph.embeddingStats();
+          if (!embStats.vecAvailable) {
+            warn("No embeddings table — run 'myelin embed' for semantic search");
+            issues.push("Run 'myelin embed' to enable semantic search");
+          } else if (embStats.embeddedNodes === 0) {
+            warn("0 nodes embedded — run 'myelin embed' for semantic search");
+            issues.push("Run 'myelin embed' to generate embeddings");
+          } else {
+            const status = `Embeddings: ${embStats.embeddedNodes}/${embStats.totalNodes} (${embStats.coveragePct.toFixed(1)}%)`;
+            if (embStats.coveragePct < 50) {
+              warn(`${status} — run 'myelin embed' to improve coverage`);
+            } else {
+              pass(status);
+            }
+          }
+        } finally {
+          graph.close();
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        fail(`Graph DB error: ${msg}`);
+        issues.push('Graph database may be corrupted — try reinitializing');
+      }
+    }
+
+    // 5. Extension installed
+    const extPath = join(homedir(), '.copilot', 'extensions', 'myelin', 'extension.mjs');
+    if (existsSync(extPath)) {
+      pass(`Extension installed: ${extPath}`);
+    } else {
+      fail('Extension not found');
+      issues.push("Run 'myelin setup-extension' to install the Copilot CLI extension");
+    }
+
+    // 6. GLiNER model
+    const modelDir = join(homedir(), '.copilot', '.working-memory', 'models', 'gliner');
+    const modelDirAlt = join(homedir(), '.cache', 'huggingface');
+    if (existsSync(modelDir)) {
+      pass(`GLiNER model directory found: ${modelDir}`);
+    } else if (existsSync(modelDirAlt)) {
+      pass(`HuggingFace cache found: ${modelDirAlt}`);
+    } else {
+      warn('GLiNER model not found — NER will use regex fallback');
+    }
+
+    // 7. sqlite-vec
+    try {
+      const testDb = new Database(':memory:');
+      try {
+        const sqliteVec = require('sqlite-vec');
+        sqliteVec.load(testDb);
+        pass('sqlite-vec loaded successfully');
+      } finally {
+        testDb.close();
+      }
+    } catch {
+      warn('sqlite-vec not available — semantic search will use FTS5 fallback');
+    }
+
+    // 8. Agent log directories
+    const agentsDir = join(homedir(), '.copilot', '.working-memory', 'agents');
+    if (existsSync(agentsDir)) {
+      try {
+        const { readdirSync, statSync } = require('node:fs');
+        const agents = (readdirSync(agentsDir) as string[]).filter((name: string) => {
+          const logFile = join(agentsDir, name, 'log.jsonl');
+          return existsSync(logFile);
+        });
+        if (agents.length > 0) {
+          pass(`Agent logs found: ${agents.join(', ')}`);
+        } else {
+          warn('No agent log files found');
+        }
+      } catch {
+        warn('Could not read agent log directory');
+      }
+    } else {
+      warn('Agent logs directory not found');
+    }
+
+    // Summary
+    console.log('');
+    if (issues.length === 0) {
+      console.log(chalk.green.bold('  All checks passed! Myelin is healthy. 🧠\n'));
+    } else {
+      console.log(chalk.yellow.bold('  Next steps:\n'));
+      for (const issue of issues) {
+        console.log(chalk.yellow(`    → ${issue}`));
+      }
+      console.log('');
+    }
+  });
+
 // ── Heartbeat migration ─────────────────────────────────────────────────────
 
 program
