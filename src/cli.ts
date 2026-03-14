@@ -956,7 +956,8 @@ program
     console.log(`Found ${files.length} files`);
 
     const parsedFiles: any[] = [];
-    let parseErrors = 0;
+    const failedFiles: Array<{ filePath: string; error: string }> = [];
+    const allFilePaths = files.map((f: { filePath: string }) => f.filePath);
     for (const { filePath, language } of files) {
       const parser = getParser(language);
       if (!parser) continue;
@@ -967,16 +968,24 @@ program
         if (parsed.entities.length > 0) {
           parsedFiles.push(parsed);
         }
-      } catch {
-        parseErrors++;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        failedFiles.push({ filePath, error: msg });
       }
     }
 
-    console.log(`Parsed ${parsedFiles.length} files (${parseErrors} errors)`);
+    console.log(`Parsed ${parsedFiles.length} files (${failedFiles.length} errors)`);
+    if (failedFiles.length > 0) {
+      const details = failedFiles.map(f => `${f.filePath} (${f.error})`).join(', ');
+      console.log(chalk.yellow(`⚠ ${failedFiles.length} files had parse errors: ${details}`));
+    }
 
     const dbPath = opts.db || join(homedir(), '.copilot', '.working-memory', 'graph.db');
-    const result = writeToGraph(parsedFiles, dbPath, ns);
+    const result = writeToGraph(parsedFiles, dbPath, ns, allFilePaths);
     console.log(chalk.green(`✅ Indexed: ${result.nodes} nodes, ${result.edges} edges from ${result.files} files`));
+    if (result.staleNodesRemoved > 0) {
+      console.log(chalk.yellow(`🧹 Cleaned ${result.staleNodesRemoved} stale nodes from deleted/renamed files`));
+    }
   });
 
 // ── Namespaces ───────────────────────────────────────────────────────────────
