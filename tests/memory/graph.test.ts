@@ -145,6 +145,60 @@ describe('findNodes', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Sensitivity ceiling filter
+// ---------------------------------------------------------------------------
+
+describe('findNodes ceiling filter', () => {
+  beforeEach(() => {
+    graph.addNode({ id: 'public', name: 'Public Info', salience: 0.8, sensitivity: 0 });
+    graph.addNode({ id: 'internal', name: 'Internal Doc', salience: 0.7, sensitivity: 1 });
+    graph.addNode({ id: 'secret', name: 'Secret Key', salience: 0.9, sensitivity: 3 });
+    graph.addNode({ id: 'unset', name: 'No Sensitivity', salience: 0.5 });
+  });
+
+  it('returns all nodes when no ceiling set', () => {
+    const nodes = graph.findNodes();
+    expect(nodes).toHaveLength(4);
+  });
+
+  it('filters out nodes above ceiling', () => {
+    const nodes = graph.findNodes({ ceiling: 1 });
+    const ids = nodes.map(n => n.id);
+    expect(ids).toContain('public');
+    expect(ids).toContain('internal');
+    expect(ids).toContain('unset');
+    expect(ids).not.toContain('secret');
+  });
+
+  it('ceiling=0 returns only level-0 and null sensitivity', () => {
+    const nodes = graph.findNodes({ ceiling: 0 });
+    const ids = nodes.map(n => n.id);
+    expect(ids).toContain('public');
+    expect(ids).toContain('unset');
+    expect(ids).not.toContain('internal');
+    expect(ids).not.toContain('secret');
+  });
+
+  it('treats null sensitivity as level 0 (backward compatible)', () => {
+    const nodes = graph.findNodes({ ceiling: 0 });
+    expect(nodes.some(n => n.id === 'unset')).toBe(true);
+  });
+
+  it('ceiling high enough returns everything', () => {
+    const nodes = graph.findNodes({ ceiling: 10 });
+    expect(nodes).toHaveLength(4);
+  });
+
+  it('combines ceiling with other filters', () => {
+    graph.addTag('secret', 'credential');
+    graph.addTag('public', 'credential');
+    const nodes = graph.findNodes({ tag: 'credential', ceiling: 1 });
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].id).toBe('public');
+  });
+});
+
 describe('searchNodes', () => {
   beforeEach(() => {
     graph.addNode({ id: 'auth', name: 'Auth Module', description: 'JWT-based authentication' });
@@ -609,6 +663,11 @@ describe('embedding operations (without sqlite-vec)', () => {
 
   it('semanticSearch returns empty when vec not available', () => {
     const results = graph.semanticSearch(new Array(384).fill(0));
+    expect(results).toHaveLength(0);
+  });
+
+  it('semanticSearch accepts ceiling parameter without error', () => {
+    const results = graph.semanticSearch(new Array(384).fill(0), 20, undefined, undefined, 2);
     expect(results).toHaveLength(0);
   });
 

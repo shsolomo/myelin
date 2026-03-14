@@ -81,6 +81,7 @@ export interface FindNodesFilters {
   limit?: number;
   namespace?: string;
   category?: string;
+  ceiling?: number;
 }
 
 export interface SubgraphFilters {
@@ -174,6 +175,8 @@ export class KnowledgeGraph {
     this.db.pragma('foreign_keys = ON');
 
     initSchema(this.db);
+    extendSchemaForCode(this.db);
+    extendSchemaForClassification(this.db);
     this.initVecExtension();
   }
 
@@ -310,6 +313,7 @@ export class KnowledgeGraph {
       limit = 50,
       namespace,
       category,
+      ceiling,
     } = filters;
 
     let query = 'SELECT DISTINCT n.* FROM nodes n';
@@ -340,6 +344,11 @@ export class KnowledgeGraph {
     if (category) {
       conditions.push('n.category = ?');
       params.push(category);
+    }
+
+    if (ceiling !== undefined) {
+      conditions.push('(n.sensitivity IS NULL OR n.sensitivity <= ?)');
+      params.push(ceiling);
     }
 
     query += ' WHERE ' + conditions.join(' AND ');
@@ -736,6 +745,7 @@ export class KnowledgeGraph {
     limit = 20,
     category?: string,
     namespace?: string,
+    ceiling?: number,
   ): Array<{ node: Node; distance: number }> {
     if (!this.hasVecTable()) return [];
 
@@ -759,6 +769,10 @@ export class KnowledgeGraph {
       if (namespace && cols.has('namespace')) {
         extraConditions.push('n.namespace = ?');
         extraParams.push(namespace);
+      }
+      if (ceiling !== undefined && cols.has('sensitivity')) {
+        extraConditions.push('(n.sensitivity IS NULL OR n.sensitivity <= ?)');
+        extraParams.push(ceiling);
       }
 
       const whereExtra = extraConditions.length > 0
