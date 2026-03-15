@@ -274,6 +274,29 @@ If `npm install -g github:shsolomo/myelin` fails, try these workarounds:
 <details>
 <summary>Common failure modes</summary>
 
+#### Windows: `ENOENT spawn cmd.exe` or TAR_ENTRY_ERROR (onnxruntime-web)
+
+`@huggingface/transformers` has a hard dependency on `onnxruntime-web` (a browser runtime myelin doesn't use). Its package contains symlinks and WebGPU directory structures that fail during tar extraction on Windows, which can cascade into native module build failures (`ENOENT spawn cmd.exe`).
+
+Myelin's `package.json` includes an `overrides` field that aliases `onnxruntime-web` → `onnxruntime-node`, but npm only applies overrides from the **root project** — during `npm install -g`, the global npm space is root, so the override is ignored.
+
+**Workaround — add the override to your global npm config:**
+
+Create or edit the `package.json` at your global npm prefix (find it with `npm prefix -g`):
+
+```json
+{
+  "overrides": {
+    "onnxruntime-web": "npm:onnxruntime-node@>=1.21.0"
+  }
+}
+```
+
+Then retry:
+```bash
+npm install -g github:shsolomo/myelin
+```
+
 #### Peer dependency conflict (tree-sitter-bicep)
 ```
 npm error ERESOLVE could not resolve
