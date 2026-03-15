@@ -108,6 +108,8 @@ Brain-inspired two-phase consolidation of agent activity logs:
 - **NREM** (Replay → Extract → Score → Transfer): Reads agent logs, extracts entities, scores salience using a dual-signal model (importance × 0.7 + novelty × 0.3), transfers to graph. Use `myelin_consolidate` tool for LLM-driven extraction.
 - **REM** (Decay → Prune → Refine): Applies temporal decay, removes stale nodes/edges, homeostatic maintenance
 
+> **Tip:** For higher-quality consolidation, use the `myelin_consolidate` extension tool in an agent session instead of the CLI `myelin sleep` command. The LLM produces richer entities and meaningful relationship types.
+
 Consolidation is idempotent — running it twice on the same logs reinforces existing nodes rather than creating duplicates.
 
 ## Knowledge Graph

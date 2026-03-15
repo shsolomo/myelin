@@ -618,6 +618,13 @@ program
   .option('-s, --stats', 'Show embedding coverage stats only')
   .option('--db <path>', 'Path to graph.db')
   .action(async (opts) => {
+    const { isAvailable } = await import('./memory/embeddings.js');
+    if (!(await isAvailable())) {
+      console.log(chalk.yellow('Embedding model not available — skipping.'));
+      console.log(chalk.dim('Embeddings are optional. FTS5 keyword search is active.'));
+      process.exit(0);
+    }
+
     const graph = openGraph(opts.db);
 
     if (opts.stats) {
@@ -758,10 +765,13 @@ program
 
 program
   .command('sleep')
-  .description('Run a full maintenance cycle — consolidation + embedding for all agents')
+  .description('Run a full maintenance cycle — consolidation for all agents')
   .option('--db <path>', 'Path to graph.db')
   .action(async (opts) => {
     console.log('\n🌙 Processing memories...\n');
+    console.log(chalk.dim('Note: CLI consolidation uses basic regex extraction.'));
+    console.log(chalk.dim('For higher-quality extraction, use the myelin_consolidate tool in an agent session.'));
+    console.log('');
 
     // Discover agents with log directories
     const agentsDir = join(homedir(), '.copilot', '.working-memory', 'agents');
@@ -816,13 +826,17 @@ program
       }
     }
 
-    // Embedding pass
+    // Embedding pass (no-ops when model not available)
     console.log('\n  🔗 Embedding nodes...');
     try {
       const embedded = await embedAllNodes(graph);
-      console.log(chalk.dim(`     ${embedded} nodes embedded`));
+      if (embedded > 0) {
+        console.log(chalk.dim(`     ${embedded} nodes embedded`));
+      } else {
+        console.log(chalk.dim('     Skipped — embedding model not available (FTS5 search active)'));
+      }
     } catch {
-      console.log(chalk.dim('     Embedding model not available — skipped'));
+      console.log(chalk.dim('     Skipped — embedding model not available (FTS5 search active)'));
     }
 
     // Summary
@@ -833,7 +847,7 @@ program
     console.log(
       `📊 Graph: ${graphStats.nodeCount} nodes, ${graphStats.edgeCount} edges, avg salience ${graphStats.avgSalience.toFixed(3)}`,
     );
-    console.log(chalk.dim('\n💡 Run `myelin sleep` nightly for best results. Add to cron or Task Scheduler.\n'));
+    console.log(chalk.dim('\n💡 For higher-quality consolidation, use the myelin_consolidate tool in an agent session.\n'));
 
     graph.close();
     process.exit(0);

@@ -13,7 +13,6 @@ myelin update
 This single command:
 1. Pulls the latest version from GitHub
 2. Rebuilds the Copilot CLI extension
-3. Downloads any new models (if `--with-models` was used previously)
 
 Restart Copilot CLI (or `/clear`) after upgrading.
 
@@ -53,6 +52,11 @@ myelin doctor       # check everything is healthy
 - `onnxruntime-node` is gone entirely — no `--with-models` flag, no local NER, no local embeddings
 - Users who had local models installed will need to rely on FTS5 search and LLM consolidation
 - Future: optional local ONNX inference and configurable embedding APIs planned for Phase 4 (#63)
+
+**Consolidation migration:**
+- NREM cron jobs should be updated from command type (running `myelin consolidate`) to prompt type (invoking the agent with the `myelin_consolidate` tool). The CLI `myelin sleep` command still works but uses basic regex extraction as a fallback.
+- The `nightly-embed` cron job can be disabled — local embeddings have been removed.
+- REM cron jobs (`rem-global`) continue to work unchanged — they're pure graph operations.
 
 ---
 
@@ -184,7 +188,7 @@ Logs are append-only and never deleted. If the graph is corrupted, it can always
 ```bash
 rm ~/.copilot/.working-memory/graph.db
 myelin init
-myelin parse ./your-repo --namespace repo:my-project --embed
+myelin parse ./your-repo --namespace repo:my-project
 myelin sleep
 ```
 
