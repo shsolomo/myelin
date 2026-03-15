@@ -10,7 +10,7 @@
 
 import { build } from "esbuild";
 import { dirname, join } from "node:path";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdirSync, copyFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -67,3 +67,12 @@ if (!globalThis.require) { globalThis.require = __createRequire(import.meta.url)
 });
 
 console.log("✅ Extension bundled to dist/extension/extension.mjs");
+
+// Copy to .github/extensions/myelin/ for genesis package distribution
+const genesisDir = join(root, ".github", "extensions", "myelin");
+mkdirSync(genesisDir, { recursive: true });
+copyFileSync(
+  join(root, "dist", "extension", "extension.mjs"),
+  join(genesisDir, "extension.mjs")
+);
+console.log("✅ Extension copied to .github/extensions/myelin/extension.mjs");

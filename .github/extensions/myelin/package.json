@@ -1,0 +1,13 @@
+{
+  "name": "myelin-extension",
+  "private": true,
+  "dependencies": {
+    "@huggingface/transformers": "^3.0.0",
+    "better-sqlite3": "^12.6.2",
+    "onnxruntime-node": "^1.21.0",
+    "sqlite-vec": "^0.1.6"
+  },
+  "overrides": {
+    "onnxruntime-web": "npm:onnxruntime-node@>=1.21.0"
+  }
+}

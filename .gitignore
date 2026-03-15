@@ -9,3 +9,6 @@ dist/
 *.db-wal
 *.db-shm
 *.sqlite
+
+# Genesis package — node_modules installed by packages skill
+.github/extensions/myelin/node_modules/

@@ -1,0 +1,19 @@
+{
+  "version": "0.7.1",
+  "source": "shsolomo/myelin",
+  "extensions": {
+    "myelin": {
+      "version": "0.7.1",
+      "path": ".github/extensions/myelin",
+      "description": "Knowledge graph memory — semantic search, NER extraction, brain-inspired consolidation"
+    }
+  },
+  "skills": {
+    "myelin-setup": {
+      "version": "0.1.0",
+      "path": ".github/skills/myelin-setup",
+      "description": "Interactive setup wizard for myelin memory system"
+    }
+  },
+  "packages": []
+}

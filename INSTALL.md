@@ -10,6 +10,16 @@ Myelin gives your Copilot CLI agents persistent, searchable memory across sessio
 
 Everything you need to give your agents memory. No extra models, no manual steps after install.
 
+### Alternative: Genesis Package Install
+
+If you're running a [genesis](https://github.com/ianphil/genesis)-based agent, install myelin as a package:
+
+```
+> install shsolomo/myelin
+```
+
+This downloads the pre-built extension and installs native dependencies. No global npm install needed. After install, restart your Copilot CLI session.
+
 ### 1. Install myelin
 
 ```bash
