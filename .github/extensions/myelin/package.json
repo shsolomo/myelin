@@ -3,7 +3,9 @@
   "private": true,
   "dependencies": {
     "better-sqlite3": "^12.6.2",
-    "onnxruntime-node": "^1.21.0",
     "sqlite-vec": "^0.1.6"
+  },
+  "optionalDependencies": {
+    "onnxruntime-node": "^1.21.0"
   }
 }

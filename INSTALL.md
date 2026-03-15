@@ -2,7 +2,7 @@
 
 Myelin gives your Copilot CLI agents persistent, searchable memory across sessions. Install it once, and every agent automatically gets graph-backed tools, context injection, and session logging — no configuration required.
 
-**What you need:** Node.js >= 20 (22+ recommended) and `gh` CLI authenticated. That's it for the package install. The npm path also requires a C++ toolchain for native modules.
+**What you need:** Node.js >= 20 (22+ recommended) and `gh` CLI authenticated. That's it for the package install. The npm path also requires a C++ toolchain for native modules. Local ML models are optional.
 
 ---
 
@@ -52,7 +52,7 @@ That's it. Your agent now has memory.
 
 1. The packages skill fetches `.github/registry.json` from the myelin repo via `gh api`
 2. It **downloads two files** — `extension.mjs` (pre-built bundle) + `package.json` (runtime deps) — via GitHub's git blob API. Not npm.
-3. It runs `npm install --production` **inside the extension directory** — this installs only the native modules the extension needs: `better-sqlite3`, `sqlite-vec`, `onnxruntime-node`
+3. It runs `npm install --production` **inside the extension directory** — this installs only the native modules the extension needs: `better-sqlite3`, `sqlite-vec` (plus `onnxruntime-node` if the platform supports it)
 4. Your agent's local `.github/registry.json` is updated to track the installed version
 
 **Why this avoids the Windows install issues:** The `npm install -g` path requires building all dependencies from source, which can fail due to native module compilation issues on Windows. The package install path **never touches npm's global space** — it downloads pre-built files directly from the repo and installs native dependencies locally in the extension directory.
@@ -93,7 +93,8 @@ This single command:
 - Initializes the graph database (`~/.copilot/.working-memory/graph.db`) if it doesn't exist
 - Bundles the extension into `~/.copilot/extensions/myelin/extension.mjs`
 - Installs native dependencies for the extension runtime
-- Downloads the GLiNER NER model and embedding model (~660MB one-time download)
+
+> **Optional:** Add `--with-models` to download GLiNER NER and embedding models (~660MB). Without models, myelin uses regex NER and FTS5 keyword search — fully functional, just less precise.
 
 ### 3. Restart Copilot CLI
 
@@ -206,11 +207,19 @@ Register-ScheduledTask -TaskName "Myelin Sleep" -Action $action -Trigger $trigge
 
 Optional configuration for power users who want more control.
 
-### GLiNER for high-precision NER
+### Local ML models (GLiNER + embeddings)
 
-By default, entity extraction uses a regex/heuristic fallback. For significantly better NER accuracy, GLiNER provides zero-shot named entity recognition using a DeBERTa v2 backbone with ONNX inference — no Python dependency at runtime.
+By default, myelin uses regex/heuristic NER and FTS5 keyword search. For higher precision, install the local ML models:
 
-GLiNER is downloaded automatically during `myelin setup-extension`. No manual steps needed. The model (~583MB) is cached at `~/.cache/myelin/models/gliner/` and will also auto-download on first NER use if not already present.
+```bash
+myelin setup-extension --with-models
+```
+
+This downloads:
+- **GLiNER** (~583MB) — zero-shot NER using DeBERTa v2 backbone with ONNX inference. Cached at `~/.cache/myelin/models/gliner/`
+- **all-MiniLM-L6-v2** (~80MB) — sentence embeddings for semantic search. Cached at `~/.cache/myelin/models/embeddings/`
+
+Requires `onnxruntime-node` (installed automatically as an optional dependency). No Python dependency at runtime.
 
 ### IDEA vault indexing
 
@@ -258,7 +267,7 @@ myelin namespaces  # list all indexed namespaces
 | Command | Description |
 |---------|-------------|
 | `myelin init` | Create the graph database (also done by `setup-extension`) |
-| `myelin setup-extension` | Bundle and install the Copilot CLI extension |
+| `myelin setup-extension` | Bundle and install the Copilot CLI extension (`--with-models` for NER/embeddings) |
 | `myelin doctor` | Health check with actionable diagnostics |
 | `myelin parse <path>` | Index a code repo with tree-sitter (`--namespace`, `--embed`) |
 | `myelin ingest <path>` | Ingest text documents with NER + relationship extraction (`--namespace`, `--embed`) |
@@ -314,13 +323,12 @@ myelin ingest ./your-notes --namespace docs:notes --embed     # for documents
 ```
 
 #### No embeddings (semantic search not working)
-Embeddings are needed for semantic search. Both models download automatically during `myelin setup-extension`. If they didn't download (network issue), run:
+Embeddings require the local embedding model. Install it with:
 ```bash
-myelin sleep                      # consolidates + embeds everything
-# or just embeddings:
-myelin embed
+myelin setup-extension --with-models   # downloads GLiNER + embedding model
+myelin embed                           # generate embeddings
 ```
-The embedding model (all-MiniLM-L6-v2, ~90MB) downloads on first use and is cached at `~/.cache/myelin/models/embeddings/`.
+Without embeddings, myelin uses FTS5 keyword search — functional but less precise. The embedding model (all-MiniLM-L6-v2, ~80MB) is cached at `~/.cache/myelin/models/embeddings/`.
 
 #### Extension not loaded
 1. Verify the extension exists: check for `~/.copilot/extensions/myelin/extension.mjs`

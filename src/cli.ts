@@ -1304,7 +1304,8 @@ program
 program
   .command('setup-extension')
   .description('Install Myelin as a Copilot CLI extension (in-process, no subprocess)')
-  .action(async () => {
+  .option('--with-models', 'Download GLiNER NER and embedding models (~660MB)')
+  .action(async (opts: { withModels?: boolean }) => {
     const { execSync } = await import('node:child_process');
     const { cpSync } = await import('node:fs');
     const myPkg = join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '..');
@@ -1334,13 +1335,15 @@ program
     writeFileSync(join(extTarget, 'extension.mjs'), readFileSync(bundledPath));
 
     // Step 4: Create a package.json for native dependencies
-    const extPkg = {
+    const extPkg: Record<string, unknown> = {
       name: 'myelin-extension',
       private: true,
       type: 'module',
       dependencies: {
         'better-sqlite3': '^12.0.0',
         'sqlite-vec': '^0.1.6',
+      },
+      optionalDependencies: {
         'onnxruntime-node': '^1.21.0',
       },
     };
@@ -1354,23 +1357,27 @@ program
       console.error(chalk.yellow('Warning: Some native deps may have failed. Extension will work with reduced features.'));
     }
 
-    // Step 6: Download models
-    console.log(chalk.cyan('Downloading models (one-time setup)...'));
-    try {
-      const { ensureGlinerModel } = await import('./memory/ner.js');
-      const result = await ensureGlinerModel();
-      if (result) console.log(chalk.green('   GLiNER NER model downloaded'));
-      else console.log(chalk.yellow('   GLiNER download failed — NER will use regex fallback'));
-    } catch {
-      console.log(chalk.yellow('   GLiNER download failed — NER will use regex fallback'));
-    }
-    try {
-      const { ensureEmbeddingModel } = await import('./memory/embeddings.js');
-      const result = await ensureEmbeddingModel();
-      if (result) console.log(chalk.green('   Embedding model downloaded'));
-      else console.log(chalk.yellow('   Embedding download failed — will retry on first use'));
-    } catch {
-      console.log(chalk.yellow('   Embedding download failed — will retry on first use'));
+    // Step 6: Download models (only with --with-models)
+    if (opts.withModels) {
+      console.log(chalk.cyan('Downloading models (one-time setup)...'));
+      try {
+        const { ensureGlinerModel } = await import('./memory/ner.js');
+        const result = await ensureGlinerModel();
+        if (result) console.log(chalk.green('   GLiNER NER model downloaded'));
+        else console.log(chalk.yellow('   GLiNER download failed — NER will use regex fallback'));
+      } catch {
+        console.log(chalk.yellow('   GLiNER download failed — NER will use regex fallback'));
+      }
+      try {
+        const { ensureEmbeddingModel } = await import('./memory/embeddings.js');
+        const result = await ensureEmbeddingModel();
+        if (result) console.log(chalk.green('   Embedding model downloaded'));
+        else console.log(chalk.yellow('   Embedding download failed — will retry on first use'));
+      } catch {
+        console.log(chalk.yellow('   Embedding download failed — will retry on first use'));
+      }
+    } else {
+      console.log(chalk.dim('   Skipping model downloads (use --with-models for local NER and semantic search)'));
     }
 
     console.log('');
@@ -1431,18 +1438,16 @@ program
             pass(`Edges: ${stats.edgeCount}`);
           }
 
-          // 4. Embedding coverage
+          // 4. Embedding coverage (informational — embeddings are optional with FTS5 fallback)
           const embStats = graph.embeddingStats();
           if (!embStats.vecAvailable) {
-            warn("No embeddings table — run 'myelin embed' for semantic search");
-            issues.push("Run 'myelin embed' to enable semantic search");
+            pass('Embeddings: not available (optional — FTS5 search active)');
           } else if (embStats.embeddedNodes === 0) {
-            warn("0 nodes embedded — run 'myelin embed' for semantic search");
-            issues.push("Run 'myelin embed' to generate embeddings");
+            pass("Embeddings: 0 nodes embedded (optional — run 'myelin embed' to enable semantic search)");
           } else {
             const status = `Embeddings: ${embStats.embeddedNodes}/${embStats.totalNodes} (${embStats.coveragePct.toFixed(1)}%)`;
             if (embStats.coveragePct < 50) {
-              warn(`${status} — run 'myelin embed' to improve coverage`);
+              pass(`${status} — run 'myelin embed' to improve coverage`);
             } else {
               pass(status);
             }
@@ -1466,7 +1471,7 @@ program
       issues.push("Run 'myelin setup-extension' to install the Copilot CLI extension");
     }
 
-    // 6. GLiNER model
+    // 6. GLiNER model (informational — models are optional)
     const modelDir = join(homedir(), '.cache', 'myelin', 'models', 'gliner');
     const modelDirOld = join(homedir(), '.copilot', '.working-memory', 'models', 'gliner');
     const modelDirAlt = join(homedir(), '.cache', 'huggingface');
@@ -1477,7 +1482,7 @@ program
     } else if (existsSync(modelDirAlt)) {
       pass(`HuggingFace cache found: ${modelDirAlt}`);
     } else {
-      warn("GLiNER model not found — run 'myelin setup-extension' to download, or NER will use regex fallback");
+      pass('GLiNER: not installed (optional — run setup-extension --with-models to enable)');
     }
 
     // 7. sqlite-vec

@@ -56,7 +56,6 @@
     "chalk": "^5.4.0",
     "cli-table3": "^0.6.5",
     "commander": "^13.0.0",
-    "onnxruntime-node": "^1.21.0",
     "sqlite-vec": "^0.1.6",
     "tree-sitter": "^0.25.0",
     "tree-sitter-bicep": "^1.1.0",
@@ -66,6 +65,9 @@
     "tree-sitter-powershell": "^0.26.3",
     "tree-sitter-python": "^0.25.0",
     "tree-sitter-typescript": "^0.23.2"
+  },
+  "optionalDependencies": {
+    "onnxruntime-node": "^1.21.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",

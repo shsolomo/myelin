@@ -43,7 +43,9 @@ npm install -g github:shsolomo/myelin
 myelin setup-extension
 ```
 
-That's it. `setup-extension` initializes the graph database, bundles the Copilot CLI extension, and downloads the NER + embedding models (~660MB one-time). Restart Copilot CLI and every agent has memory.
+That's it. `setup-extension` initializes the graph database, bundles the Copilot CLI extension, and installs native dependencies. Restart Copilot CLI and every agent has memory.
+
+> **Optional:** Add `--with-models` to `setup-extension` for local NER and semantic search (~660MB download). Without models, myelin uses regex NER and FTS5 keyword search — fully functional.
 
 See [INSTALL.md](INSTALL.md) for detailed setup and troubleshooting. See [UPGRADE.md](UPGRADE.md) for upgrading between versions.
 
@@ -122,24 +124,24 @@ Edges are typed (RelatesTo, DependsOn, Supersedes, LearnedFrom, BelongsTo, Autho
 
 **Pinned nodes** never decay and always load at boot — useful for constitutional knowledge that should never be forgotten.
 
-## Local Models
+## Local Models (Optional)
 
-All models run locally. No data leaves your machine. Both models download automatically during `myelin setup-extension`.
+All models run locally. No data leaves your machine. Models are optional — install with `myelin setup-extension --with-models`.
 
-| Model | Purpose | Size |
-|-------|---------|------|
-| [GLiNER](https://huggingface.co/shsolo/gliner-small-v2.1-onnx) (gliner_small-v2.1) | Zero-shot NER — entity extraction | ~583MB |
-| all-MiniLM-L6-v2 | Sentence embeddings — 384-dim vectors for semantic search | ~80MB |
-| Tree-sitter grammars | AST parsing — 10 languages | ~5MB each |
+| Model | Purpose | Size | Required? |
+|-------|---------|------|-----------|
+| [GLiNER](https://huggingface.co/shsolo/gliner-small-v2.1-onnx) (gliner_small-v2.1) | Zero-shot NER — entity extraction | ~583MB | Optional (regex fallback) |
+| all-MiniLM-L6-v2 | Sentence embeddings — 384-dim vectors for semantic search | ~80MB | Optional (FTS5 fallback) |
+| Tree-sitter grammars | AST parsing — 10 languages | ~5MB each | Included |
 
-GLiNER uses a DeBERTa v2 backbone + span classifier via ONNX Runtime. If unavailable, NER falls back to regex/heuristic patterns — functional but lower precision.
+GLiNER uses a DeBERTa v2 backbone + span classifier via ONNX Runtime. If unavailable, NER falls back to regex/heuristic patterns — functional but lower precision. Semantic search falls back to FTS5 keyword search when embeddings are unavailable.
 
 ## CLI Reference
 
 | Command | Description |
 |---------|-------------|
 | `myelin init` | Initialize graph database |
-| `myelin setup-extension` | Bundle extension, install deps, download models |
+| `myelin setup-extension` | Bundle extension, install deps (`--with-models` for NER/embeddings) |
 | `myelin doctor` | Health check with actionable diagnostics |
 | `myelin sleep` | Full maintenance cycle (consolidate + embed all agents) |
 | `myelin parse <path>` | Index code repo with tree-sitter (`--namespace`, `--embed`) |
