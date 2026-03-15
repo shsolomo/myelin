@@ -47,19 +47,12 @@ var require_better_sqlite3 = __commonJS({
   }
 });
 
-// require-external:onnxruntime-node
-var require_onnxruntime_node = __commonJS({
-  "require-external:onnxruntime-node"(exports, module) {
-    module.exports = globalThis.require("onnxruntime-node");
-  }
-});
-
 // src/extension/extension.in-process.ts
 var import_copilot_sdk = __toESM(require_copilot_sdk(), 1);
 var import_extension = __toESM(require_extension(), 1);
-import { homedir as homedir5 } from "node:os";
-import { join as join6 } from "node:path";
-import { existsSync as existsSync4 } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { join as join4 } from "node:path";
+import { existsSync as existsSync3 } from "node:fs";
 
 // src/memory/graph.ts
 var import_better_sqlite3 = __toESM(require_better_sqlite3(), 1);
@@ -1099,424 +1092,13 @@ function appendStructuredLog(agentName, entryType, summary, options = {}) {
 }
 
 // src/memory/embeddings.ts
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, writeFileSync } from "node:fs";
-import { join as join3 } from "node:path";
-import { homedir as homedir3 } from "node:os";
-
-// src/memory/tokenizer.ts
-import { readFileSync as readFileSync2 } from "node:fs";
-async function loadTokenizer(tokenizerJsonPath) {
-  const raw = readFileSync2(tokenizerJsonPath, "utf-8");
-  const config = JSON.parse(raw);
-  const addedTokenMap = /* @__PURE__ */ new Map();
-  if (config.added_tokens) {
-    for (const t of config.added_tokens) {
-      addedTokenMap.set(t.content, t.id);
-    }
-  }
-  if (config.model.type === "WordPiece") {
-    return buildWordPieceTokenizer(config, addedTokenMap);
-  } else if (config.model.type === "Unigram") {
-    return buildUnigramTokenizer(config, addedTokenMap);
-  } else {
-    throw new Error(`Unsupported tokenizer type: ${config.model.type}`);
-  }
-}
-function buildWordPieceTokenizer(config, addedTokens) {
-  const vocabObj = config.model.vocab;
-  const vocab = /* @__PURE__ */ new Map();
-  for (const [token, id] of Object.entries(vocabObj)) {
-    vocab.set(token, id);
-  }
-  for (const [token, id] of addedTokens) {
-    vocab.set(token, id);
-  }
-  const reverseVocab = /* @__PURE__ */ new Map();
-  for (const [token, id] of vocab) {
-    reverseVocab.set(id, token);
-  }
-  const unkToken = config.model.unk_token ?? "[UNK]";
-  const prefix = config.model.continuing_subword_prefix ?? "##";
-  const maxChars = config.model.max_input_chars_per_word ?? 100;
-  const clsId = vocab.get("[CLS]") ?? 101;
-  const sepId = vocab.get("[SEP]") ?? 102;
-  const normConfig = config.normalizer;
-  const doLowercase = normConfig?.type === "BertNormalizer" && normConfig.lowercase !== false;
-  const doStripAccents = normConfig?.type === "BertNormalizer" && normConfig.strip_accents !== false;
-  function normalize(text) {
-    let result = text;
-    if (doLowercase) {
-      result = result.toLowerCase();
-    }
-    if (doStripAccents) {
-      result = result.normalize("NFD").replace(/[\u0300-\u036f]/g, "").normalize("NFC");
-    }
-    return result;
-  }
-  function preTokenize(text) {
-    const tokens = [];
-    const words = text.split(/\s+/).filter((w) => w.length > 0);
-    for (const word of words) {
-      let current = "";
-      let currentIsPunct = null;
-      for (const ch of word) {
-        const isPunct = isUnicodePunctuation(ch);
-        if (currentIsPunct !== null && isPunct !== currentIsPunct) {
-          if (current.length > 0) tokens.push(current);
-          current = "";
-        }
-        current += ch;
-        currentIsPunct = isPunct;
-      }
-      if (current.length > 0) tokens.push(current);
-    }
-    return tokens;
-  }
-  function wordPieceTokenize(word) {
-    if (word.length > maxChars) {
-      return [vocab.get(unkToken) ?? 100];
-    }
-    const ids = [];
-    let start = 0;
-    while (start < word.length) {
-      let end = word.length;
-      let foundId;
-      while (start < end) {
-        const substr = start > 0 ? prefix + word.slice(start, end) : word.slice(start, end);
-        const id = vocab.get(substr);
-        if (id !== void 0) {
-          foundId = id;
-          break;
-        }
-        end--;
-      }
-      if (foundId === void 0) {
-        return [vocab.get(unkToken) ?? 100];
-      }
-      ids.push(foundId);
-      start = end;
-    }
-    return ids;
-  }
-  function encode(text, options) {
-    const addSpecial = options?.addSpecialTokens !== false;
-    const normalized = normalize(text);
-    const preTokens = preTokenize(normalized);
-    const ids = [];
-    if (addSpecial) ids.push(clsId);
-    for (const preToken of preTokens) {
-      ids.push(...wordPieceTokenize(preToken));
-    }
-    if (addSpecial) ids.push(sepId);
-    return ids;
-  }
-  return {
-    encode,
-    tokenToId: (token) => vocab.get(token),
-    idToToken: (id) => reverseVocab.get(id),
-    vocab
-  };
-}
-function buildUnigramTokenizer(config, addedTokens) {
-  const vocabArray = config.model.vocab;
-  const vocab = /* @__PURE__ */ new Map();
-  const scores = /* @__PURE__ */ new Map();
-  for (let i = 0; i < vocabArray.length; i++) {
-    const [token, score] = vocabArray[i];
-    vocab.set(token, i);
-    scores.set(token, score);
-  }
-  for (const [token, id] of addedTokens) {
-    vocab.set(token, id);
-  }
-  const reverseVocab = /* @__PURE__ */ new Map();
-  for (const [token, id] of vocab) {
-    reverseVocab.set(id, token);
-  }
-  const unkId = config.model.unk_id ?? 3;
-  const trie = buildTrie(vocabArray);
-  const normConfig = config.normalizer;
-  function normalize(text) {
-    let result = text;
-    if (normConfig) {
-      if (normConfig.type === "Sequence" && normConfig.normalizers) {
-        for (const n of normConfig.normalizers) {
-          result = applyNormalizer(result, n);
-        }
-      } else {
-        result = applyNormalizer(result, normConfig);
-      }
-    }
-    return result;
-  }
-  function metaspacePreTokenize(text) {
-    if (text.length === 0) return [];
-    const transformed = "\u2581" + text.replace(/ /g, "\u2581");
-    const segments = [];
-    let current = "";
-    for (let i = 0; i < transformed.length; i++) {
-      const ch = transformed[i];
-      if (ch === "\u2581" && current.length > 0) {
-        segments.push(current);
-        current = "\u2581";
-      } else {
-        current += ch;
-      }
-    }
-    if (current.length > 0) segments.push(current);
-    return segments;
-  }
-  function unigramTokenize(preToken) {
-    const len = preToken.length;
-    if (len === 0) return [];
-    const bestScore = new Float64Array(len + 1);
-    const bestLen = new Int32Array(len + 1);
-    bestScore[0] = 0;
-    for (let i = 1; i <= len; i++) {
-      bestScore[i] = -Infinity;
-    }
-    for (let i = 0; i < len; i++) {
-      if (bestScore[i] === -Infinity) continue;
-      const matches = trieSearch(trie, preToken, i);
-      for (const { token, score } of matches) {
-        const end = i + token.length;
-        const candidateScore = bestScore[i] + score;
-        if (candidateScore > bestScore[end]) {
-          bestScore[end] = candidateScore;
-          bestLen[end] = token.length;
-        }
-      }
-    }
-    if (bestScore[len] === -Infinity) {
-      return new Array(len).fill(unkId);
-    }
-    const tokenIds = [];
-    let pos = len;
-    while (pos > 0) {
-      const tokenLen = bestLen[pos];
-      if (tokenLen === 0) {
-        return new Array(len).fill(unkId);
-      }
-      const token = preToken.slice(pos - tokenLen, pos);
-      const id = vocab.get(token);
-      tokenIds.push(id ?? unkId);
-      pos -= tokenLen;
-    }
-    tokenIds.reverse();
-    return tokenIds;
-  }
-  function encode(text, options) {
-    const addSpecial = options?.addSpecialTokens !== false;
-    const normalized = normalize(text);
-    const preTokens = metaspacePreTokenize(normalized);
-    const ids = [];
-    if (addSpecial) ids.push(vocab.get("[CLS]") ?? 1);
-    for (const preToken of preTokens) {
-      ids.push(...unigramTokenize(preToken));
-    }
-    if (addSpecial) ids.push(vocab.get("[SEP]") ?? 2);
-    return ids;
-  }
-  return {
-    encode,
-    tokenToId: (token) => vocab.get(token),
-    idToToken: (id) => reverseVocab.get(id),
-    vocab
-  };
-}
-function buildTrie(vocabArray) {
-  const root = { children: /* @__PURE__ */ new Map(), token: null, score: 0 };
-  for (const [token, score] of vocabArray) {
-    let node = root;
-    for (const ch of token) {
-      let child = node.children.get(ch);
-      if (!child) {
-        child = { children: /* @__PURE__ */ new Map(), token: null, score: 0 };
-        node.children.set(ch, child);
-      }
-      node = child;
-    }
-    node.token = token;
-    node.score = score;
-  }
-  return root;
-}
-function trieSearch(root, text, startPos) {
-  const matches = [];
-  let node = root;
-  for (let i = startPos; i < text.length; i++) {
-    const ch = text[i];
-    const child = node.children.get(ch);
-    if (!child) break;
-    node = child;
-    if (node.token !== null) {
-      matches.push({ token: node.token, score: node.score });
-    }
-  }
-  return matches;
-}
-function applyNormalizer(text, config) {
-  switch (config.type) {
-    case "BertNormalizer": {
-      let result = text;
-      if (config.lowercase !== false) result = result.toLowerCase();
-      if (config.strip_accents !== false) {
-        result = result.normalize("NFD").replace(/[\u0300-\u036f]/g, "").normalize("NFC");
-      }
-      return result;
-    }
-    case "Replace": {
-      const pattern = config.pattern;
-      if (pattern?.Regex) {
-        const regex = new RegExp(pattern.Regex, "g");
-        return text.replace(regex, config.content ?? "");
-      }
-      if (pattern?.String) {
-        return text.replaceAll(pattern.String, config.content ?? "");
-      }
-      return text;
-    }
-    case "NFC":
-      return text.normalize("NFC");
-    case "NFD":
-      return text.normalize("NFD");
-    case "NFKC":
-      return text.normalize("NFKC");
-    case "NFKD":
-      return text.normalize("NFKD");
-    case "Strip": {
-      let result = text;
-      if (config.strip_left) result = result.trimStart();
-      if (config.strip_right !== false) result = result.trimEnd();
-      return result;
-    }
-    case "Lowercase":
-      return text.toLowerCase();
-    case "Sequence": {
-      let result = text;
-      if (config.normalizers) {
-        for (const n of config.normalizers) {
-          result = applyNormalizer(result, n);
-        }
-      }
-      return result;
-    }
-    default:
-      return text;
-  }
-}
-function isUnicodePunctuation(ch) {
-  const cp = ch.codePointAt(0);
-  if (cp >= 33 && cp <= 47 || // ! " # $ % & ' ( ) * + , - . /
-  cp >= 58 && cp <= 64 || // : ; < = > ? @
-  cp >= 91 && cp <= 96 || // [ \ ] ^ _ `
-  cp >= 123 && cp <= 126) {
-    return true;
-  }
-  return new RegExp("^\\p{P}$", "u").test(ch);
-}
-
-// src/memory/embeddings.ts
-var EMBEDDING_DIM = 384;
-var EMBEDDING_CACHE_DIR = join3(homedir3(), ".cache", "myelin", "models", "embeddings");
-var HF_BASE_URL = "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main";
-var MODEL_FILES = [
-  { remote: "onnx/model.onnx", local: "model.onnx" },
-  { remote: "tokenizer.json", local: "tokenizer.json" }
-];
-var _session = null;
-var _loadFailed = false;
-async function ensureEmbeddingModel() {
-  const modelPath = join3(EMBEDDING_CACHE_DIR, "model.onnx");
-  if (existsSync2(modelPath)) return EMBEDDING_CACHE_DIR;
-  try {
-    mkdirSync2(EMBEDDING_CACHE_DIR, { recursive: true });
-    for (const file of MODEL_FILES) {
-      const url = HF_BASE_URL + "/" + file.remote;
-      const destPath = join3(EMBEDDING_CACHE_DIR, file.local);
-      if (existsSync2(destPath)) continue;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error("Failed to download " + file.remote + ": " + response.status);
-      const buffer = Buffer.from(await response.arrayBuffer());
-      writeFileSync(destPath, buffer);
-    }
-    return EMBEDDING_CACHE_DIR;
-  } catch {
-    return null;
-  }
-}
-async function getSession() {
-  if (_session !== null) return _session;
-  if (_loadFailed) return null;
-  const modelDir = await ensureEmbeddingModel();
-  if (modelDir === null) {
-    _loadFailed = true;
-    return null;
-  }
-  try {
-    const ort = await Promise.resolve().then(() => __toESM(require_onnxruntime_node(), 1));
-    const session2 = await ort.InferenceSession.create(
-      join3(modelDir, "model.onnx"),
-      { executionProviders: ["cpu"] }
-    );
-    const tokenizer = await loadTokenizer(join3(modelDir, "tokenizer.json"));
-    _session = { session: session2, tokenizer };
-    return _session;
-  } catch {
-    _loadFailed = true;
-    return null;
-  }
-}
-async function runEmbedding(es, text) {
-  const ort = await Promise.resolve().then(() => __toESM(require_onnxruntime_node(), 1));
-  const tokenIds = es.tokenizer.encode(text, { addSpecialTokens: true });
-  const seqLen = tokenIds.length;
-  const inputIds = new BigInt64Array(tokenIds.map(BigInt));
-  const attentionMask = new BigInt64Array(seqLen).fill(1n);
-  const tokenTypeIds = new BigInt64Array(seqLen).fill(0n);
-  const feeds = {
-    input_ids: new ort.Tensor("int64", inputIds, [1, seqLen]),
-    attention_mask: new ort.Tensor("int64", attentionMask, [1, seqLen]),
-    token_type_ids: new ort.Tensor("int64", tokenTypeIds, [1, seqLen])
-  };
-  const results = await es.session.run(feeds);
-  const output = results.last_hidden_state ?? results.token_embeddings ?? Object.values(results)[0];
-  const data = output.data;
-  const embedding = new Float64Array(EMBEDDING_DIM);
-  for (let t = 0; t < seqLen; t++) {
-    const offset = t * EMBEDDING_DIM;
-    for (let d = 0; d < EMBEDDING_DIM; d++) {
-      embedding[d] += data[offset + d];
-    }
-  }
-  for (let d = 0; d < EMBEDDING_DIM; d++) {
-    embedding[d] /= seqLen;
-  }
-  let norm = 0;
-  for (let d = 0; d < EMBEDDING_DIM; d++) {
-    norm += embedding[d] * embedding[d];
-  }
-  norm = Math.sqrt(norm);
-  if (norm > 0) {
-    for (let d = 0; d < EMBEDDING_DIM; d++) {
-      embedding[d] /= norm;
-    }
-  }
-  return Array.from(embedding);
-}
-async function getEmbedding(text) {
-  const es = await getSession();
-  if (!es) return [];
-  try {
-    return await runEmbedding(es, text);
-  } catch {
-    return [];
-  }
+async function getEmbedding(_text) {
+  return [];
 }
 
 // src/memory/replay.ts
-import { readFileSync as readFileSync3, existsSync as existsSync3, writeFileSync as writeFileSync2, unlinkSync, copyFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join as join5, basename } from "node:path";
+import { readFileSync as readFileSync2, existsSync as existsSync2, writeFileSync, unlinkSync, copyFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join as join3, basename } from "node:path";
 
 // src/memory/vocabulary.ts
 var ENTITY_PATTERNS = [
@@ -1653,13 +1235,6 @@ Only extract entities that are MEANINGFUL \u2014 skip filler, transient details,
 Link new entities to existing ones when there's a real relationship.
 `;
 }
-
-// src/memory/ner.ts
-import { join as join4 } from "node:path";
-import { homedir as homedir4 } from "node:os";
-var GLINER_MODEL_ID = "shsolo/gliner-small-v2.1-onnx";
-var GLINER_CACHE_DIR = join4(homedir4(), ".cache", "myelin", "models", "gliner");
-var HF_BASE_URL2 = "https://huggingface.co/" + GLINER_MODEL_ID + "/resolve/main";
 
 // src/memory/extractors.ts
 var LABEL_TO_NODE_TYPE = {
@@ -1980,7 +1555,7 @@ function formatBackupTimestamp(d) {
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 function backupGraph(dbPath) {
-  if (!dbPath || !existsSync3(dbPath)) return null;
+  if (!dbPath || !existsSync2(dbPath)) return null;
   const dir = dirname(dbPath);
   const base = basename(dbPath);
   const now = /* @__PURE__ */ new Date();
@@ -1992,7 +1567,7 @@ function backupGraph(dbPath) {
     if (existing.some((f) => f.startsWith(`${prefix}${todayPrefix}`))) return null;
   } catch {
   }
-  const backupPath = join5(dir, `${prefix}${tsStr}`);
+  const backupPath = join3(dir, `${prefix}${tsStr}`);
   copyFileSync(dbPath, backupPath);
   return backupPath;
 }
@@ -2021,7 +1596,7 @@ function prepareConsolidation(agentName, options) {
     chunks.push({ text, entryCount: batch.length });
   }
   let existingEntities = [];
-  if (options?.dbPath && existsSync3(options.dbPath)) {
+  if (options?.dbPath && existsSync2(options.dbPath)) {
     try {
       const graph = new KnowledgeGraph(options.dbPath);
       try {
@@ -2117,12 +1692,12 @@ function pruneOrphanEdges(graph) {
 }
 
 // src/extension/extension.in-process.ts
-var WORKING_MEMORY = join6(homedir5(), ".copilot", ".working-memory");
-var DB_PATH = join6(WORKING_MEMORY, "graph.db");
+var WORKING_MEMORY = join4(homedir3(), ".copilot", ".working-memory");
+var DB_PATH = join4(WORKING_MEMORY, "graph.db");
 var MYELIN_VERSION = "0.8.0";
 var sessionAgent = null;
 function getGraph() {
-  if (!existsSync4(DB_PATH)) return null;
+  if (!existsSync3(DB_PATH)) return null;
   return new KnowledgeGraph(DB_PATH);
 }
 var session = await (0, import_extension.joinSession)({
@@ -2131,7 +1706,7 @@ var session = await (0, import_extension.joinSession)({
     onSessionStart: async (_input, _invocation) => {
       try {
         await session.log(`Myelin v${MYELIN_VERSION} loaded \u2014 5 tools, 3 hooks`);
-        if (!existsSync4(DB_PATH)) {
+        if (!existsSync3(DB_PATH)) {
           await session.log("No graph database found. Run `myelin init` to create one.", { level: "warning" });
           return;
         }

@@ -1,7 +1,7 @@
 {
   "name": "myelin",
   "version": "0.8.0",
-  "description": "Knowledge graph memory system for AI agents. Semantic search, NER extraction, brain-inspired consolidation.",
+  "description": "Knowledge graph memory system for AI agents. FTS5 search, LLM-driven consolidation, brain-inspired memory.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -65,9 +65,6 @@
     "tree-sitter-powershell": "^0.26.3",
     "tree-sitter-python": "^0.25.0",
     "tree-sitter-typescript": "^0.23.2"
-  },
-  "optionalDependencies": {
-    "onnxruntime-node": "^1.21.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",

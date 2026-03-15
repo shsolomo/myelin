@@ -4,9 +4,6 @@
 import { createRequire } from 'node:module';
 if (!globalThis.require) { globalThis.require = createRequire(import.meta.url); }
 
-// Suppress model loading progress bars
-process.env.HF_HUB_DISABLE_PROGRESS_BARS = '1';
-
 import { program } from 'commander';
 import chalk from 'chalk';
 import Table from 'cli-table3';
@@ -1304,8 +1301,7 @@ program
 program
   .command('setup-extension')
   .description('Install Myelin as a Copilot CLI extension (in-process, no subprocess)')
-  .option('--with-models', 'Download GLiNER NER and embedding models (~660MB)')
-  .action(async (opts: { withModels?: boolean }) => {
+  .action(async () => {
     const { execSync } = await import('node:child_process');
     const { cpSync } = await import('node:fs');
     const myPkg = join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '..');
@@ -1343,9 +1339,6 @@ program
         'better-sqlite3': '^12.0.0',
         'sqlite-vec': '^0.1.6',
       },
-      optionalDependencies: {
-        'onnxruntime-node': '^1.21.0',
-      },
     };
     writeFileSync(join(extTarget, 'package.json'), JSON.stringify(extPkg, null, 2));
 
@@ -1357,39 +1350,17 @@ program
       console.error(chalk.yellow('Warning: Some native deps may have failed. Extension will work with reduced features.'));
     }
 
-    // Step 6: Download models (only with --with-models)
-    if (opts.withModels) {
-      console.log(chalk.cyan('Downloading models (one-time setup)...'));
-      try {
-        const { ensureGlinerModel } = await import('./memory/ner.js');
-        const result = await ensureGlinerModel();
-        if (result) console.log(chalk.green('   GLiNER NER model downloaded'));
-        else console.log(chalk.yellow('   GLiNER download failed — NER will use regex fallback'));
-      } catch {
-        console.log(chalk.yellow('   GLiNER download failed — NER will use regex fallback'));
-      }
-      try {
-        const { ensureEmbeddingModel } = await import('./memory/embeddings.js');
-        const result = await ensureEmbeddingModel();
-        if (result) console.log(chalk.green('   Embedding model downloaded'));
-        else console.log(chalk.yellow('   Embedding download failed — will retry on first use'));
-      } catch {
-        console.log(chalk.yellow('   Embedding download failed — will retry on first use'));
-      }
-    } else {
-      console.log(chalk.dim('   Skipping model downloads (use --with-models for local NER and semantic search)'));
-    }
-
     console.log('');
     console.log(chalk.green('✅ Myelin extension installed at: ') + extTarget);
     console.log(chalk.gray('   Restart Copilot CLI or run /clear to load the extension.'));
     console.log('');
     console.log(chalk.cyan('Tools available after reload:'));
-    console.log('   myelin_query   — semantic graph search');
-    console.log('   myelin_boot    — agent context from graph');
-    console.log('   myelin_log     — structured event logging');
-    console.log('   myelin_show    — node detail + edges');
-    console.log('   myelin_stats   — graph statistics');
+    console.log('   myelin_query        — keyword + semantic graph search');
+    console.log('   myelin_boot         — agent context from graph');
+    console.log('   myelin_log          — structured event logging');
+    console.log('   myelin_show         — node detail + edges');
+    console.log('   myelin_stats        — graph statistics');
+    console.log('   myelin_consolidate  — LLM-driven memory consolidation');
     console.log('');
     console.log(chalk.cyan('Auto hooks:'));
     console.log('   onSessionStart          — graph context injected automatically');
@@ -1471,35 +1442,21 @@ program
       issues.push("Run 'myelin setup-extension' to install the Copilot CLI extension");
     }
 
-    // 6. GLiNER model (informational — models are optional)
-    const modelDir = join(homedir(), '.cache', 'myelin', 'models', 'gliner');
-    const modelDirOld = join(homedir(), '.copilot', '.working-memory', 'models', 'gliner');
-    const modelDirAlt = join(homedir(), '.cache', 'huggingface');
-    if (existsSync(modelDir)) {
-      pass(`GLiNER model directory found: ${modelDir}`);
-    } else if (existsSync(modelDirOld)) {
-      pass(`GLiNER model found (legacy location): ${modelDirOld}`);
-    } else if (existsSync(modelDirAlt)) {
-      pass(`HuggingFace cache found: ${modelDirAlt}`);
-    } else {
-      pass('GLiNER: not installed (optional — run setup-extension --with-models to enable)');
-    }
-
-    // 7. sqlite-vec
+    // 6. sqlite-vec (informational — search uses FTS5 by default)
     try {
       const testDb = new Database(':memory:');
       try {
         const sqliteVec = require('sqlite-vec');
         sqliteVec.load(testDb);
-        pass('sqlite-vec loaded successfully');
+        pass('sqlite-vec loaded (optional — enables semantic search when embeddings are available)');
       } finally {
         testDb.close();
       }
     } catch {
-      warn('sqlite-vec not available — semantic search will use FTS5 fallback');
+      pass('sqlite-vec not installed (optional — FTS5 keyword search is the default)');
     }
 
-    // 8. Agent log directories
+    // 7. Agent log directories
     const agentsDir = join(homedir(), '.copilot', '.working-memory', 'agents');
     if (existsSync(agentsDir)) {
       try {

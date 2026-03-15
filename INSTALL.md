@@ -2,7 +2,7 @@
 
 Myelin gives your Copilot CLI agents persistent, searchable memory across sessions. Install it once, and every agent automatically gets graph-backed tools, context injection, and session logging — no configuration required.
 
-**What you need:** Node.js >= 20 (22+ recommended) and `gh` CLI authenticated. That's it for the package install. The npm path also requires a C++ toolchain for native modules. Local ML models are optional.
+**What you need:** Node.js >= 20 (22+ recommended) and `gh` CLI authenticated. That's it for the package install. The npm path also requires a C++ toolchain for native modules.
 
 ---
 
@@ -52,10 +52,8 @@ That's it. Your agent now has memory.
 
 1. The packages skill fetches `.github/registry.json` from the myelin repo via `gh api`
 2. It **downloads two files** — `extension.mjs` (pre-built bundle) + `package.json` (runtime deps) — via GitHub's git blob API. Not npm.
-3. It runs `npm install --production` **inside the extension directory** — this installs only the native modules the extension needs: `better-sqlite3`, `sqlite-vec` (plus `onnxruntime-node` if the platform supports it)
+3. It runs `npm install --production` **inside the extension directory** — this installs only the native modules the extension needs: `better-sqlite3` and `sqlite-vec`
 4. Your agent's local `.github/registry.json` is updated to track the installed version
-
-**Why this avoids the Windows install issues:** The `npm install -g` path requires building all dependencies from source, which can fail due to native module compilation issues on Windows. The package install path **never touches npm's global space** — it downloads pre-built files directly from the repo and installs native dependencies locally in the extension directory.
 
 ### After install
 
@@ -94,8 +92,6 @@ This single command:
 - Bundles the extension into `~/.copilot/extensions/myelin/extension.mjs`
 - Installs native dependencies for the extension runtime
 
-> **Optional:** Add `--with-models` to download GLiNER NER and embedding models (~660MB). Without models, myelin uses regex NER and FTS5 keyword search — fully functional, just less precise.
-
 ### 3. Restart Copilot CLI
 
 Start a new Copilot CLI session (or run `/clear`). The extension loads automatically.
@@ -106,7 +102,7 @@ Start a new Copilot CLI session (or run `/clear`). The extension loads automatic
 
 | Tool | What it does |
 |------|-------------|
-| `myelin_query` | Semantic + keyword search over the knowledge graph |
+| `myelin_query` | Keyword + semantic search over the knowledge graph |
 | `myelin_boot` | Load agent-specific context at session start |
 | `myelin_log` | Log structured events (decision, finding, error, etc.) |
 | `myelin_show` | Inspect a node and its connections |
@@ -123,10 +119,10 @@ Start a new Copilot CLI session (or run `/clear`). The extension loads automatic
 ### 4. Index your code (optional but recommended)
 
 ```bash
-myelin parse ./path/to/your-repo --namespace repo:my-project --embed
+myelin parse ./path/to/your-repo --namespace repo:my-project
 ```
 
-The `--namespace` flag partitions your graph by source. Use a consistent naming convention like `repo:name` for code and `docs:name` for documents. The `--embed` flag generates embeddings for semantic search.
+The `--namespace` flag partitions your graph by source. Use a consistent naming convention like `repo:name` for code and `docs:name` for documents.
 
 Extracts classes, methods, interfaces, functions, and their relationships using tree-sitter. Supports C#, TypeScript, JavaScript, Python, Go, JSON, YAML, Dockerfile, PowerShell, and Bicep.
 
@@ -149,12 +145,12 @@ Grow the knowledge graph from documents and agent activity.
 ### Ingest documents
 
 ```bash
-myelin ingest ./path/to/notes --namespace docs:notes --embed
+myelin ingest ./path/to/notes --namespace docs:notes
 ```
 
 Chunks text files, extracts entities (people, tools, decisions, projects), and creates relationship edges. Works with markdown, plain text, meeting recaps — any text content.
 
-Use `--fast` to skip embedding-based relationship classification (faster, proximity-only edges):
+Use `--fast` for proximity-only edges (faster):
 ```bash
 myelin ingest ./path/to/notes --namespace docs:notes --fast
 ```
@@ -180,7 +176,6 @@ One command does it all:
 1. Discovers all agents with logs
 2. Runs NREM consolidation (replays logs → extracts entities → scores salience → writes to graph)
 3. Runs REM refinement (global decay → pruning)
-4. Generates embeddings for all nodes (required for semantic search)
 
 ### Schedule nightly maintenance
 
@@ -206,20 +201,6 @@ Register-ScheduledTask -TaskName "Myelin Sleep" -Action $action -Trigger $trigge
 ## Tier 3: Advanced
 
 Optional configuration for power users who want more control.
-
-### Local ML models (GLiNER + embeddings)
-
-By default, myelin uses regex/heuristic NER and FTS5 keyword search. For higher precision, install the local ML models:
-
-```bash
-myelin setup-extension --with-models
-```
-
-This downloads:
-- **GLiNER** (~583MB) — zero-shot NER using DeBERTa v2 backbone with ONNX inference. Cached at `~/.cache/myelin/models/gliner/`
-- **all-MiniLM-L6-v2** (~80MB) — sentence embeddings for semantic search. Cached at `~/.cache/myelin/models/embeddings/`
-
-Requires `onnxruntime-node` (installed automatically as an optional dependency). No Python dependency at runtime.
 
 ### IDEA vault indexing
 
@@ -254,9 +235,9 @@ Extension hooks apply default sensitivity ceilings to avoid injecting too much c
 ### Index multiple repos
 
 ```bash
-myelin parse ./frontend --namespace repo:frontend --embed
-myelin parse ./backend --namespace repo:backend --embed
-myelin parse ./infra --namespace repo:infra --embed
+myelin parse ./frontend --namespace repo:frontend
+myelin parse ./backend --namespace repo:backend
+myelin parse ./infra --namespace repo:infra
 myelin namespaces  # list all indexed namespaces
 ```
 
@@ -267,11 +248,11 @@ myelin namespaces  # list all indexed namespaces
 | Command | Description |
 |---------|-------------|
 | `myelin init` | Create the graph database (also done by `setup-extension`) |
-| `myelin setup-extension` | Bundle and install the Copilot CLI extension (`--with-models` for NER/embeddings) |
+| `myelin setup-extension` | Bundle and install the Copilot CLI extension |
 | `myelin doctor` | Health check with actionable diagnostics |
-| `myelin parse <path>` | Index a code repo with tree-sitter (`--namespace`, `--embed`) |
-| `myelin ingest <path>` | Ingest text documents with NER + relationship extraction (`--namespace`, `--embed`) |
-| `myelin vault <path>` | Index an IDEA vault (`--namespace`, `--embed`) |
+| `myelin parse <path>` | Index a code repo with tree-sitter (`--namespace`) |
+| `myelin ingest <path>` | Ingest text documents with entity extraction (`--namespace`) |
+| `myelin vault <path>` | Index an IDEA vault (`--namespace`) |
 | `myelin sleep` | Full maintenance cycle (consolidate + embed all agents) |
 | `myelin consolidate` | Run consolidation for a specific agent |
 | `myelin embed` | Generate embeddings for semantic search |
@@ -318,17 +299,9 @@ This checks your graph database, schema, node counts, and embedding coverage. Fo
 #### Graph is empty (0 nodes)
 You've initialized but haven't indexed anything yet. Run:
 ```bash
-myelin parse ./your-repo --namespace repo:your-repo --embed   # for code
-myelin ingest ./your-notes --namespace docs:notes --embed     # for documents
+myelin parse ./your-repo --namespace repo:your-repo   # for code
+myelin ingest ./your-notes --namespace docs:notes      # for documents
 ```
-
-#### No embeddings (semantic search not working)
-Embeddings require the local embedding model. Install it with:
-```bash
-myelin setup-extension --with-models   # downloads GLiNER + embedding model
-myelin embed                           # generate embeddings
-```
-Without embeddings, myelin uses FTS5 keyword search — functional but less precise. The embedding model (all-MiniLM-L6-v2, ~80MB) is cached at `~/.cache/myelin/models/embeddings/`.
 
 #### Extension not loaded
 1. Verify the extension exists: check for `~/.copilot/extensions/myelin/extension.mjs`
@@ -406,7 +379,7 @@ Logs are never deleted, so the graph can always be rebuilt from scratch:
 ```bash
 rm ~/.copilot/.working-memory/graph.db      # delete corrupted DB
 myelin init                                  # create fresh DB
-myelin parse ./your-repo --namespace repo:your-repo --embed  # re-index code
-myelin sleep                                 # replay all agent logs + embed
+myelin parse ./your-repo --namespace repo:your-repo  # re-index code
+myelin sleep                                 # replay all agent logs
 ```
 

@@ -21,7 +21,6 @@ const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf-8"));
 const requirePackages = [
   "better-sqlite3",
   "sqlite-vec",
-  "onnxruntime-node",
   "@github/copilot-sdk",
   "@github/copilot-sdk/extension",
 ];

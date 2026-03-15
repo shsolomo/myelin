@@ -4,8 +4,5 @@
   "dependencies": {
     "better-sqlite3": "^12.6.2",
     "sqlite-vec": "^0.1.6"
-  },
-  "optionalDependencies": {
-    "onnxruntime-node": "^1.21.0"
   }
 }

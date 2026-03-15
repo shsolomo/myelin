@@ -2,7 +2,7 @@
 
 Knowledge graph memory system for AI agents. Named after the neural sheath that makes signals travel faster the more a path is used — that's what this does for agent memory.
 
-Myelin gives AI agents persistent, searchable memory across sessions. It uses brain-inspired consolidation (NREM/REM phases) to extract knowledge from agent activity, local NLP models for entity recognition and semantic search, and a graph database that reinforces what matters and forgets what doesn't.
+Myelin gives AI agents persistent, searchable memory across sessions. It uses brain-inspired consolidation (NREM/REM phases) to extract knowledge from agent activity, FTS5 keyword search over a graph database that reinforces what matters and forgets what doesn't.
 
 **Fully local. Zero API calls. Your memory stays on your machine.**
 
@@ -16,8 +16,8 @@ Myelin gives AI agents persistent, searchable memory across sessions. It uses br
        ▼                     ▼                      ▼
   ┌─────────┐        ┌──────────────┐       ┌──────────────┐
   │  parse   │        │   ingest     │       │ consolidate  │
-  │ (tree-   │        │ (GLiNER NER  │       │ (NREM/REM    │
-  │  sitter) │        │  + embed RE) │       │  phases)     │
+  │ (tree-   │        │ (entity     │       │ (NREM/REM    │
+  │  sitter) │        │  extraction) │       │  phases)     │
   └────┬─────┘        └──────┬───────┘       └──────┬───────┘
        │                     │                      │
        └─────────────────────┼──────────────────────┘
@@ -45,8 +45,6 @@ myelin setup-extension
 
 That's it. `setup-extension` initializes the graph database, bundles the Copilot CLI extension, and installs native dependencies. Restart Copilot CLI and every agent has memory.
 
-> **Optional:** Add `--with-models` to `setup-extension` for local NER and semantic search (~660MB download). Without models, myelin uses regex NER and FTS5 keyword search — fully functional.
-
 See [INSTALL.md](INSTALL.md) for detailed setup and troubleshooting. See [UPGRADE.md](UPGRADE.md) for upgrading between versions.
 
 ## What Agents Get
@@ -57,7 +55,7 @@ After setup, every Copilot CLI agent automatically gets:
 
 | Tool | What it does |
 |------|-------------|
-| `myelin_query` | Semantic + keyword search over the knowledge graph |
+| `myelin_query` | Keyword + semantic search over the knowledge graph |
 | `myelin_boot` | Load agent-specific context at session start |
 | `myelin_log` | Log structured events (decision, finding, error, etc.) |
 | `myelin_show` | Inspect a node and its connections |
@@ -75,12 +73,12 @@ After setup, every Copilot CLI agent automatically gets:
 
 ```bash
 # Index a codebase
-myelin parse ./my-project --namespace repo:my-project --embed
+myelin parse ./my-project --namespace repo:my-project
 
 # Ingest text documents
-myelin ingest ./my-notes --namespace docs:notes --embed
+myelin ingest ./my-notes --namespace docs:notes
 
-# Run a full maintenance cycle (consolidate + embed)
+# Run a full maintenance cycle
 myelin sleep
 
 # Search the graph
@@ -90,7 +88,7 @@ myelin query "how does authentication work"
 myelin doctor
 ```
 
-Namespaces partition the graph by source, enabling filtered queries and future access controls. The `--embed` flag generates embeddings for semantic search (`myelin sleep` does this automatically).
+Namespaces partition the graph by source, enabling filtered queries and future access controls.
 
 ## Three Pipelines
 
@@ -100,14 +98,14 @@ Extracts structural entities from source code using **tree-sitter** AST parsing.
 **Languages:** C#, TypeScript/TSX, JavaScript, Python, Go, JSON, YAML, Dockerfile, PowerShell, Bicep
 
 ### `myelin ingest` — Document Ingestion
-General-purpose pipeline for any text file. Chunks documents, runs **GLiNER** zero-shot NER to extract entities, then uses **all-MiniLM-L6-v2** embeddings to classify relationships between entity pairs by comparing context against prototype sentences. Use `--namespace` to assign a namespace (e.g., `--namespace docs:notes`).
+General-purpose pipeline for any text file. Chunks documents, extracts entities using regex/heuristic patterns (people, tools, decisions, projects), and creates relationship edges between co-occurring entities. Use `--namespace` to assign a namespace (e.g., `--namespace docs:notes`).
 
-Produces 9 distinct relationship types instead of generic "relates_to". Use `--fast` for proximity-only edges without embeddings.
+Use `--fast` for proximity-only edges.
 
 ### `myelin sleep` — Memory Consolidation
 Brain-inspired two-phase consolidation of agent activity logs:
 
-- **NREM** (Replay → Extract → Score → Transfer): Reads agent logs, extracts entities via NER, scores salience using a dual-signal model (importance × 0.7 + novelty × 0.3), transfers to graph
+- **NREM** (Replay → Extract → Score → Transfer): Reads agent logs, extracts entities, scores salience using a dual-signal model (importance × 0.7 + novelty × 0.3), transfers to graph. Use `myelin_consolidate` tool for LLM-driven extraction.
 - **REM** (Decay → Prune → Refine): Applies temporal decay, removes stale nodes/edges, homeostatic maintenance
 
 Consolidation is idempotent — running it twice on the same logs reinforces existing nodes rather than creating duplicates.
@@ -118,38 +116,37 @@ Nodes are typed (Person, Tool, Decision, Pattern, Bug, Initiative, Meeting, Rule
 
 Edges are typed (RelatesTo, DependsOn, Supersedes, LearnedFrom, BelongsTo, AuthoredBy, EvolvedInto, etc.) with weights and reinforcement timestamps.
 
-**Search** is hybrid: semantic search first (KNN via sqlite-vec on 384-dim embeddings), with FTS5 keyword fallback when embeddings are unavailable or results are poor.
+**Search** is FTS5 keyword-based, with optional semantic boost via sqlite-vec when embeddings are available.
 
 **Decay** follows an exponential forgetting curve — recently reinforced nodes decay slower. Nodes below the salience threshold AND older than the age cutoff are pruned. Both conditions must hold to prevent premature forgetting.
 
 **Pinned nodes** never decay and always load at boot — useful for constitutional knowledge that should never be forgotten.
 
-## Local Models (Optional)
+## Dependencies
 
-All models run locally. No data leaves your machine. Models are optional — install with `myelin setup-extension --with-models`.
+All processing runs locally. No data leaves your machine.
 
-| Model | Purpose | Size | Required? |
-|-------|---------|------|-----------|
-| [GLiNER](https://huggingface.co/shsolo/gliner-small-v2.1-onnx) (gliner_small-v2.1) | Zero-shot NER — entity extraction | ~583MB | Optional (regex fallback) |
-| all-MiniLM-L6-v2 | Sentence embeddings — 384-dim vectors for semantic search | ~80MB | Optional (FTS5 fallback) |
-| Tree-sitter grammars | AST parsing — 10 languages | ~5MB each | Included |
+| Component | Purpose | Required? |
+|-----------|---------|-----------|
+| better-sqlite3 | Graph database storage | Yes |
+| sqlite-vec | Vector search (optional semantic boost) | Included |
+| Tree-sitter grammars | AST parsing — 10 languages | Included |
 
-GLiNER uses a DeBERTa v2 backbone + span classifier via ONNX Runtime. If unavailable, NER falls back to regex/heuristic patterns — functional but lower precision. Semantic search falls back to FTS5 keyword search when embeddings are unavailable.
+Entity extraction uses the host LLM via the `myelin_consolidate` tool — no local ML models needed.
 
 ## CLI Reference
 
 | Command | Description |
 |---------|-------------|
 | `myelin init` | Initialize graph database |
-| `myelin setup-extension` | Bundle extension, install deps (`--with-models` for NER/embeddings) |
+| `myelin setup-extension` | Bundle extension, install deps |
 | `myelin doctor` | Health check with actionable diagnostics |
-| `myelin sleep` | Full maintenance cycle (consolidate + embed all agents) |
-| `myelin parse <path>` | Index code repo with tree-sitter (`--namespace`, `--embed`) |
-| `myelin ingest <path>` | Ingest text documents with NER + embedding RE (`--namespace`, `--embed`) |
-| `myelin vault <path>` | Index IDEA vault structure (`--namespace`, `--embed`) |
+| `myelin sleep` | Full maintenance cycle (consolidate all agents) |
+| `myelin parse <path>` | Index code repo with tree-sitter (`--namespace`) |
+| `myelin ingest <path>` | Ingest text documents with entity extraction (`--namespace`) |
+| `myelin vault <path>` | Index IDEA vault structure (`--namespace`) |
 | `myelin consolidate` | Run NREM/REM consolidation |
-| `myelin embed` | Generate/update embeddings |
-| `myelin query <text>` | Semantic + keyword search |
+| `myelin query <text>` | Keyword + semantic search |
 | `myelin show <name>` | Show node and connections |
 | `myelin stats` | Graph statistics |
 | `myelin nodes` | List nodes with filters |
@@ -171,9 +168,9 @@ npm run build         # TypeScript compile
 npm run bundle-extension  # esbuild bundle for Copilot CLI
 ```
 
-Tests are **required** for all code changes. CI runs on every push and PR across Node 20/22 on Linux, Windows, and macOS (520+ tests).
+Tests are **required** for all code changes. CI runs on every push and PR across Node 20/22 on Linux, Windows, and macOS.
 
-Test files live in `tests/` mirroring `src/` structure. Use Vitest with in-memory SQLite for graph tests and mocked NER/embeddings for extraction tests.
+Test files live in `tests/` mirroring `src/` structure. Use Vitest with in-memory SQLite for graph tests.
 
 ## Design Principles
 
