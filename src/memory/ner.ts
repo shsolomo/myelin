@@ -33,7 +33,7 @@ export interface NEREntity {
 const MAX_WIDTH = 12;
 const WORD_REGEX = /\w+(?:[-_]\w+)*|\S/g;
 
-const GLINER_MODEL_ID = 'shsolomo/gliner-small-v2.1-onnx';
+const GLINER_MODEL_ID = 'shsolo/gliner-small-v2.1-onnx';
 const GLINER_CACHE_DIR = join(homedir(), '.cache', 'myelin', 'models', 'gliner');
 const HF_BASE_URL = 'https://huggingface.co/' + GLINER_MODEL_ID + '/resolve/main';
 const MODEL_FILES = ['model.onnx', 'tokenizer.json', 'gliner_config.json', 'tokenizer_config.json'];

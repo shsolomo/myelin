@@ -128,7 +128,7 @@ All models run locally. No data leaves your machine. Both models download automa
 
 | Model | Purpose | Size |
 |-------|---------|------|
-| [GLiNER](https://huggingface.co/shsolomo/gliner-small-v2.1-onnx) (gliner_small-v2.1) | Zero-shot NER — entity extraction | ~583MB |
+| [GLiNER](https://huggingface.co/shsolo/gliner-small-v2.1-onnx) (gliner_small-v2.1) | Zero-shot NER — entity extraction | ~583MB |
 | all-MiniLM-L6-v2 | Sentence embeddings — 384-dim vectors for semantic search | ~80MB |
 | Tree-sitter grammars | AST parsing — 10 languages | ~5MB each |
 

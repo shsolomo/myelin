@@ -44,7 +44,7 @@ myelin doctor       # check everything is healthy
 
 **What changed:**
 
-- **GLiNER auto-downloads from HuggingFace** — The NER model now downloads automatically during `setup-extension` and on first use. No more Python export or manual file copying. Model hosted at [shsolomo/gliner-small-v2.1-onnx](https://huggingface.co/shsolomo/gliner-small-v2.1-onnx).
+- **GLiNER auto-downloads from HuggingFace** — The NER model now downloads automatically during `setup-extension` and on first use. No more Python export or manual file copying. Model hosted at [shsolo/gliner-small-v2.1-onnx](https://huggingface.co/shsolo/gliner-small-v2.1-onnx).
 - **Embedding model downloads during setup** — The all-MiniLM-L6-v2 embedding model also downloads eagerly during `setup-extension` instead of on first use.
 - **`myelin viz` removed** — The interactive D3.js visualization command has been removed. If you have scripts referencing `myelin viz`, remove them.
 - **Extension bugs fixed** — Version string, `getMindRoot()`, and cron job paths corrected for global installs.
