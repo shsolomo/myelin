@@ -1,9 +1,9 @@
 {
-  "version": "0.7.1",
+  "version": "0.7.2",
   "source": "shsolomo/myelin",
   "extensions": {
     "myelin": {
-      "version": "0.7.1",
+      "version": "0.7.2",
       "path": ".github/extensions/myelin",
       "description": "Knowledge graph memory — semantic search, NER extraction, brain-inspired consolidation"
     }
