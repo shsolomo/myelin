@@ -614,18 +614,12 @@ export function buildCodeIndex(
 // ---------------------------------------------------------------------------
 
 /**
- * Extract entities from a log entry using GLiNER (preferred) or regex
- * fallback.
+ * Extract entities from a log entry using NER.
  *
- * GLiNER path:
- *   1. Run zero-shot NER on the full entry text.
- *   2. Map GLiNER labels → NodeType via LABEL_TO_NODE_TYPE.
- *   3. For person entities, use the entity text as the node name.
- *   4. For non-person entities, use the entry heading as the node name
- *      (GLiNER match determines the *type*).
+ * With ONNX/GLiNER removed, this returns empty results.
+ * Use the myelin_consolidate extension tool for LLM-based extraction.
  *
- * Fallback path (GLiNER unavailable):
- *   Regex person detection + keyword matching.
+ * @deprecated Use myelin_consolidate tool in an agent session instead.
  */
 export async function extractFromEntry(
   entry: LogEntry,
@@ -633,16 +627,12 @@ export async function extractFromEntry(
 ): Promise<ExtractionResult> {
   const salience = scoreEntry(entry);
 
-  // Always try NER first  it lazy-loads on first call.
-  // isAvailable() is only true after the first extractEntities() call,
-  // so we can't gate on it before trying.
-  const nerResult = await extractWithNer(entry, salience.combined, sourceAgent);
-  if (nerResult.entities.length > 0) {
-    return nerResult;
-  }
-
-  // NER returned nothing (model unavailable or no entities found)  regex fallback
-  return extractWithRegex(entry, salience.combined, sourceAgent);
+  return {
+    sourceEntry: entry,
+    entities: [],
+    relationships: [],
+    salience: salience.combined,
+  };
 }
 
 /**

@@ -137,15 +137,26 @@ describe('sleep consolidation cycle', () => {
 
     const graph = new KnowledgeGraph(dbPath);
 
-    // Run NREM
+    // NREM with LLM extraction path (extractFromEntry is deprecated, returns empty)
+    // Test that NREM processes entries without crashing, even with no extraction
     const nrem = await nremReplay(graph, logPath, { agentName: 'testbot' });
     expect(nrem.entriesProcessed).toBeGreaterThanOrEqual(2);
+
+    // Test LLM ingestion path directly (needs logPath so nremReplay doesn't short-circuit)
+    const llmExtraction = JSON.stringify({
+      entities: [
+        { id: 'sqlite-storage', type: 'decision', name: 'Use SQLite', description: 'Chose SQLite for storage', salience: 0.8 },
+      ],
+      relationships: [],
+    });
+    const nremLlm = await nremReplay(graph, logPath, { agentName: 'testbot', llmExtractions: [llmExtraction] });
+    expect(nremLlm.entitiesExtracted).toBe(1);
 
     // Run REM
     const rem = remRefine(graph);
     expect(rem.nodesDecayed).toBeGreaterThanOrEqual(0);
 
-    // Verify graph has nodes
+    // Verify graph has the LLM-extracted node
     const stats = graph.stats();
     expect(stats.nodeCount).toBeGreaterThan(0);
 

@@ -454,7 +454,16 @@ describe('16. End-to-end NREM → ceiling query', () => {
     ];
     writeFileSync(logPath, logEntries.map(e => JSON.stringify(e)).join('\n'), 'utf-8');
 
-    await nremReplay(graph, logPath, { agentName: 'test' });
+    // Use LLM extraction path (extractFromEntry is deprecated)
+    const extraction = JSON.stringify({
+      entities: [
+        { id: 'john-doe', type: 'person', name: 'John Doe', description: 'Strategy meeting participant', salience: 0.7 },
+        { id: 'redis-cache', type: 'tool', name: 'Redis Cache', description: 'Deployed to production', salience: 0.6 },
+      ],
+      relationships: [],
+    });
+
+    await nremReplay(graph, logPath, { agentName: 'test', llmExtractions: [extraction] });
 
     const allNodes = graph.findNodes();
     expect(allNodes.length).toBeGreaterThan(0);

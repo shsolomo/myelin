@@ -369,25 +369,17 @@ describe('buildCodeIndex', () => {
 });
 
 // ---------------------------------------------------------------------------
-// extractFromEntry (with NER mocked → regex fallback)
+// extractFromEntry (deprecated — returns empty, LLM consolidation is primary)
 // ---------------------------------------------------------------------------
 
-describe('extractFromEntry (regex fallback)', () => {
-  it('extracts person names from capitalized two-word patterns', async () => {
+describe('extractFromEntry (deprecated)', () => {
+  it('returns empty entities (extraction moved to LLM consolidation)', async () => {
     const entry = makeEntry('2025-12-01', 'Meeting notes', 'Talked with John Smith about the project.', 'observation');
     const result = await extractFromEntry(entry);
-    expect(result.entities.some(e => e.name === 'John Smith')).toBe(true);
-    expect(result.entities.find(e => e.name === 'John Smith')!.type).toBe(NodeType.Person);
+    expect(result.entities).toHaveLength(0);
   });
 
-  it('extracts entities by keyword matching', async () => {
-    const entry = makeEntry('2025-12-01', 'Bug found', 'Found a critical bug in the authentication module that causes a crash.', 'observation');
-    const result = await extractFromEntry(entry);
-    // Should extract an entity from the heading based on keyword match
-    expect(result.entities.length).toBeGreaterThan(0);
-  });
-
-  it('includes salience score', async () => {
+  it('includes salience score even with no entities', async () => {
     const entry = makeEntry('2025-12-01', 'Security issue', 'Discovered a security vulnerability.', 'observation');
     const result = await extractFromEntry(entry);
     expect(result.salience).toBeGreaterThan(0);
@@ -397,13 +389,5 @@ describe('extractFromEntry (regex fallback)', () => {
     const entry = makeEntry('2025-12-01', '', '', 'observation');
     const result = await extractFromEntry(entry);
     expect(result.entities).toHaveLength(0);
-  });
-
-  it('filters out non-person names like Session Handover', async () => {
-    const entry = makeEntry('2025-12-01', 'Update', 'Session Handover notes from Daily Report.', 'handover');
-    const result = await extractFromEntry(entry);
-    const personNames = result.entities.filter(e => e.type === NodeType.Person).map(e => e.name);
-    expect(personNames).not.toContain('Session Handover');
-    expect(personNames).not.toContain('Daily Report');
   });
 });

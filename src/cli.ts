@@ -765,89 +765,37 @@ program
 
 program
   .command('sleep')
-  .description('Run a full maintenance cycle — consolidation for all agents')
+  .description('Run graph maintenance — decay, prune, integrity checks')
   .option('--db <path>', 'Path to graph.db')
   .action(async (opts) => {
-    console.log('\n🌙 Processing memories...\n');
-    console.log(chalk.dim('Note: CLI consolidation uses basic regex extraction.'));
-    console.log(chalk.dim('For higher-quality extraction, use the myelin_consolidate tool in an agent session.'));
+    console.log('\n🌙 Running graph maintenance...\n');
+    console.log(chalk.dim('Entity extraction uses the myelin_consolidate tool in an agent session.'));
+    console.log(chalk.dim('This command runs REM (decay/prune) and integrity checks only.'));
     console.log('');
-
-    // Discover agents with log directories
-    const agentsDir = join(homedir(), '.copilot', '.working-memory', 'agents');
-    let agents: string[] = [];
-    if (existsSync(agentsDir)) {
-      agents = readdirSync(agentsDir, { withFileTypes: true })
-        .filter((d) => d.isDirectory())
-        .map((d) => d.name);
-    }
-
-    if (agents.length === 0) {
-      console.log(chalk.yellow('  No agent logs found. Run some sessions first, then try again.'));
-      process.exit(0);
-    }
 
     const graph = openGraph(opts.db);
 
     // NREM + REM for each agent
-    let totalEntries = 0;
-    let totalNodes = 0;
-    let totalEdges = 0;
-
-    for (const agent of agents) {
-      const logPath = resolveLogPath(agent);
-      if (!logPath) {
-        console.log(chalk.dim(`  ⏭  ${agent} — no logs, skipping`));
-        continue;
-      }
-
-      console.log(`  🧠 Consolidating ${agent}...`);
-
-      try {
-        const nrem = await nremReplay(graph, logPath, { agentName: agent });
-        totalEntries += nrem.entriesProcessed;
-        totalNodes += nrem.nodesAdded;
-        totalEdges += nrem.edgesAdded;
-
-        console.log(
-          chalk.dim(`     ${nrem.entriesProcessed} entries → ${nrem.nodesAdded} nodes, ${nrem.edgesAdded} edges`),
-        );
-      } catch (err: any) {
-        console.log(chalk.yellow(`     ⚠️ NREM failed: ${err.message}`));
-      }
-
-      try {
-        const rem = remRefine(graph);
-        if (rem.nodesPruned > 0 || rem.edgesPruned > 0) {
-          console.log(chalk.dim(`     Pruned: ${rem.nodesPruned} nodes, ${rem.edgesPruned} edges`));
-        }
-      } catch (err: any) {
-        console.log(chalk.yellow(`     ⚠️ REM failed: ${err.message}`));
-      }
-    }
-
-    // Embedding pass (no-ops when model not available)
-    console.log('\n  🔗 Embedding nodes...');
+    // REM: decay, prune, integrity checks
+    console.log('  🧹 Running REM refinement...');
     try {
-      const embedded = await embedAllNodes(graph);
-      if (embedded > 0) {
-        console.log(chalk.dim(`     ${embedded} nodes embedded`));
-      } else {
-        console.log(chalk.dim('     Skipped — embedding model not available (FTS5 search active)'));
+      const rem = remRefine(graph);
+      console.log(chalk.dim(`     Decayed: ${rem.nodesDecayed} nodes`));
+      if (rem.nodesPruned > 0 || rem.edgesPruned > 0) {
+        console.log(chalk.dim(`     Pruned: ${rem.nodesPruned} nodes, ${rem.edgesPruned} edges`));
       }
-    } catch {
-      console.log(chalk.dim('     Skipped — embedding model not available (FTS5 search active)'));
+    } catch (err: any) {
+      console.log(chalk.yellow(`     ⚠️ REM failed: ${err.message}`));
     }
 
     // Summary
     const graphStats = graph.stats();
     console.log(
-      `\n✅ Sleep complete — ${totalEntries} entries processed, ${totalNodes} nodes added, ${totalEdges} edges created`,
+      `\n✅ Maintenance complete`,
     );
     console.log(
       `📊 Graph: ${graphStats.nodeCount} nodes, ${graphStats.edgeCount} edges, avg salience ${graphStats.avgSalience.toFixed(3)}`,
     );
-    console.log(chalk.dim('\n💡 For higher-quality consolidation, use the myelin_consolidate tool in an agent session.\n'));
 
     graph.close();
     process.exit(0);
