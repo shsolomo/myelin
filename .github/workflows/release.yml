@@ -30,6 +30,12 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Bundle extension
+        run: npm run bundle-extension
+
+      - name: Sync registry version
+        run: node scripts/sync-genesis-registry.mjs
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:

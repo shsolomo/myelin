@@ -31,3 +31,40 @@ jobs:
 
       - name: Test
         run: npm test
+
+  sync-genesis:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Build
+        run: npm run build
+
+      - name: Bundle extension
+        run: npm run bundle-extension
+
+      - name: Sync registry version
+        run: node scripts/sync-genesis-registry.mjs
+
+      - name: Commit genesis package updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/extensions/myelin/extension.mjs .github/registry.json
+          git diff --cached --quiet || git commit -m "chore: sync genesis package bundle and registry"
+          git push
