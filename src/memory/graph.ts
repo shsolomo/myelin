@@ -407,6 +407,68 @@ export class KnowledgeGraph {
     return rows.map((r) => this.rowToNode(r));
   }
 
+  /**
+   * FTS5-based keyword search returning scored results.
+   * Primary search path — works without embeddings.
+   * Falls back to LIKE if FTS5 query syntax fails.
+   */
+  queryByKeyword(
+    query: string,
+    limit = 10,
+    ceiling?: number,
+  ): Array<{ node: Node; score: number }> {
+    const ceilingFilter =
+      ceiling !== undefined
+        ? ' AND (n.sensitivity IS NULL OR n.sensitivity <= ?)'
+        : '';
+
+    // Try FTS5 with BM25 ranking
+    try {
+      const params: unknown[] = [query];
+      if (ceiling !== undefined) params.push(ceiling);
+      params.push(limit);
+
+      const rows = this.db
+        .prepare(
+          `SELECT n.*, rank FROM nodes n
+           JOIN node_fts fts ON n.rowid = fts.rowid
+           WHERE node_fts MATCH ?${ceilingFilter}
+           ORDER BY rank
+           LIMIT ?`,
+        )
+        .all(...params) as Array<NodeRow & { rank: number }>;
+
+      if (rows.length > 0) {
+        return rows.map((r) => ({
+          node: this.rowToNode(r),
+          score: 1 / (1 + Math.abs(r.rank)),
+        }));
+      }
+    } catch {
+      // FTS5 match failed — fall through to LIKE
+    }
+
+    // Fallback: LIKE search using salience as proxy score
+    const like = `%${query}%`;
+    const likeParams: unknown[] = [like, like];
+    if (ceiling !== undefined) likeParams.push(ceiling);
+    likeParams.push(limit);
+
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM nodes n
+         WHERE (n.name LIKE ? OR n.description LIKE ?)${ceilingFilter}
+         ORDER BY n.salience DESC
+         LIMIT ?`,
+      )
+      .all(...likeParams) as NodeRow[];
+
+    return rows.map((r) => ({
+      node: this.rowToNode(r),
+      score: r.salience,
+    }));
+  }
+
   updateNode(
     id: string,
     fields: Partial<

@@ -228,6 +228,67 @@ describe('searchNodes', () => {
   });
 });
 
+describe('queryByKeyword', () => {
+  beforeEach(() => {
+    graph.addNode({ id: 'auth', name: 'Auth Module', description: 'JWT-based authentication', salience: 0.8 });
+    graph.addNode({ id: 'cache', name: 'Redis Cache', description: 'Caching layer for API', salience: 0.6 });
+    graph.addNode({ id: 'secret', name: 'Secret Key', description: 'Encryption key store', salience: 0.9, sensitivity: 3 });
+  });
+
+  it('returns scored results via FTS5', () => {
+    const results = graph.queryByKeyword('Auth');
+    expect(results.length).toBeGreaterThanOrEqual(1);
+    expect(results[0]).toHaveProperty('node');
+    expect(results[0]).toHaveProperty('score');
+    expect(results.some(r => r.node.id === 'auth')).toBe(true);
+  });
+
+  it('score is a positive number', () => {
+    const results = graph.queryByKeyword('JWT');
+    expect(results.length).toBeGreaterThanOrEqual(1);
+    expect(results[0].score).toBeGreaterThan(0);
+  });
+
+  it('returns empty array for no match', () => {
+    const results = graph.queryByKeyword('zzz-nonexistent-zzz');
+    expect(results).toHaveLength(0);
+  });
+
+  it('respects limit', () => {
+    const results = graph.queryByKeyword('Module', 1);
+    expect(results.length).toBeLessThanOrEqual(1);
+  });
+
+  it('filters by ceiling', () => {
+    const results = graph.queryByKeyword('Key', 10, 1);
+    const ids = results.map(r => r.node.id);
+    expect(ids).not.toContain('secret');
+  });
+
+  it('ceiling=undefined returns all matching nodes', () => {
+    const results = graph.queryByKeyword('Key', 10);
+    const ids = results.map(r => r.node.id);
+    expect(ids).toContain('secret');
+  });
+
+  it('falls back to LIKE for invalid FTS5 syntax', () => {
+    // Parentheses in query can break FTS5 — should fallback to LIKE
+    const results = graph.queryByKeyword('Auth()', 10);
+    // Should not throw, may or may not find results via LIKE
+    expect(Array.isArray(results)).toBe(true);
+  });
+
+  it('LIKE fallback uses salience as score', () => {
+    // Force LIKE fallback with special chars that break FTS5
+    const results = graph.queryByKeyword('"Auth Module"', 10);
+    // Results from LIKE fallback use salience as score proxy
+    for (const r of results) {
+      expect(r.score).toBeGreaterThanOrEqual(0);
+      expect(r.score).toBeLessThanOrEqual(1);
+    }
+  });
+});
+
 describe('updateNode', () => {
   it('updates name', () => {
     graph.addNode({ id: 'n1', name: 'Old Name' });

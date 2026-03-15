@@ -485,6 +485,47 @@ var KnowledgeGraph = class {
     ).all(like, like, limit);
     return rows.map((r) => this.rowToNode(r));
   }
+  /**
+   * FTS5-based keyword search returning scored results.
+   * Primary search path — works without embeddings.
+   * Falls back to LIKE if FTS5 query syntax fails.
+   */
+  queryByKeyword(query, limit = 10, ceiling) {
+    const ceilingFilter = ceiling !== void 0 ? " AND (n.sensitivity IS NULL OR n.sensitivity <= ?)" : "";
+    try {
+      const params = [query];
+      if (ceiling !== void 0) params.push(ceiling);
+      params.push(limit);
+      const rows2 = this.db.prepare(
+        `SELECT n.*, rank FROM nodes n
+           JOIN node_fts fts ON n.rowid = fts.rowid
+           WHERE node_fts MATCH ?${ceilingFilter}
+           ORDER BY rank
+           LIMIT ?`
+      ).all(...params);
+      if (rows2.length > 0) {
+        return rows2.map((r) => ({
+          node: this.rowToNode(r),
+          score: 1 / (1 + Math.abs(r.rank))
+        }));
+      }
+    } catch {
+    }
+    const like = `%${query}%`;
+    const likeParams = [like, like];
+    if (ceiling !== void 0) likeParams.push(ceiling);
+    likeParams.push(limit);
+    const rows = this.db.prepare(
+      `SELECT * FROM nodes n
+         WHERE (n.name LIKE ? OR n.description LIKE ?)${ceilingFilter}
+         ORDER BY n.salience DESC
+         LIMIT ?`
+    ).all(...likeParams);
+    return rows.map((r) => ({
+      node: this.rowToNode(r),
+      score: r.salience
+    }));
+  }
   updateNode(id, fields) {
     const allowed = {
       name: "name",
@@ -1495,7 +1536,7 @@ var session = await (0, import_extension.joinSession)({
             } else {
               const embStats = healthGraph.embeddingStats();
               if (!embStats.vecAvailable || embStats.embeddedNodes === 0) {
-                contextParts.push("", "\u{1F4A1} No embeddings \u2014 run `myelin embed` for semantic search");
+                contextParts.push("", "\u2139\uFE0F Search uses FTS5 keywords. Run `myelin embed` to add optional semantic boost.");
               }
             }
           } catch {
@@ -1548,23 +1589,43 @@ var session = await (0, import_extension.joinSession)({
         try {
           const limit = args.limit || 10;
           const ceiling = args.ceiling ?? 1;
-          const queryEmbedding = await getEmbedding(args.query);
-          if (queryEmbedding.length > 0) {
-            const results = graph.semanticSearch(queryEmbedding, limit, void 0, void 0, ceiling);
-            if (results.length > 0) {
-              const lines2 = results.map(
-                (r) => `[${r.distance.toFixed(3)}] ${r.node.type} | ${r.node.name} (${r.node.salience.toFixed(2)}) \u2014 ${r.node.description?.slice(0, 100)}`
-              );
-              return `Semantic search: '${args.query}' (ceiling=${ceiling})
+          const ftsResults = graph.queryByKeyword(args.query, limit, ceiling);
+          if (ftsResults.length >= limit) {
+            const lines2 = ftsResults.map(
+              (r) => `[${r.score.toFixed(3)}] ${r.node.type} | ${r.node.name} (${r.node.salience.toFixed(2)}) \u2014 ${r.node.description?.slice(0, 100)}`
+            );
+            return `Search: '${args.query}' (${ftsResults.length} results, ceiling=${ceiling})
 ${lines2.join("\n")}`;
+          }
+          let semanticResults = [];
+          try {
+            const queryEmbedding = await getEmbedding(args.query);
+            if (queryEmbedding.length > 0) {
+              const vecResults = graph.semanticSearch(queryEmbedding, limit, void 0, void 0, ceiling);
+              semanticResults = vecResults.map((r) => ({
+                node: r.node,
+                score: 1 / (1 + r.distance)
+              }));
+            }
+          } catch {
+          }
+          const merged = /* @__PURE__ */ new Map();
+          for (const r of ftsResults) {
+            merged.set(r.node.id, r);
+          }
+          for (const r of semanticResults) {
+            const existing = merged.get(r.node.id);
+            if (!existing || r.score > existing.score) {
+              merged.set(r.node.id, r);
             }
           }
-          const nodes = graph.searchNodes(args.query, limit * 2).filter((n) => (n.sensitivity ?? 0) <= ceiling).slice(0, limit);
-          if (nodes.length === 0) return `No results for '${args.query}'`;
-          const lines = nodes.map(
-            (n) => `${n.type} | ${n.name} (${n.salience.toFixed(2)}) \u2014 ${n.description?.slice(0, 100)}`
+          const results = [...merged.values()].sort((a, b) => b.score - a.score).slice(0, limit);
+          if (results.length === 0) return `No results for '${args.query}'`;
+          const searchType = semanticResults.length > 0 ? "Hybrid search" : "Search";
+          const lines = results.map(
+            (r) => `[${r.score.toFixed(3)}] ${r.node.type} | ${r.node.name} (${r.node.salience.toFixed(2)}) \u2014 ${r.node.description?.slice(0, 100)}`
           );
-          return `FTS5 search: '${args.query}' (ceiling=${ceiling})
+          return `${searchType}: '${args.query}' (${results.length} results, ceiling=${ceiling})
 ${lines.join("\n")}`;
         } catch (e) {
           await session.log(`myelin_query error: ${e.message}`, { level: "error" });

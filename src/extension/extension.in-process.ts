@@ -102,7 +102,7 @@ const session = await joinSession({
             } else {
               const embStats = healthGraph.embeddingStats();
               if (!embStats.vecAvailable || embStats.embeddedNodes === 0) {
-                contextParts.push("", "💡 No embeddings — run `myelin embed` for semantic search");
+                contextParts.push("", "ℹ️ Search uses FTS5 keywords. Run `myelin embed` to add optional semantic boost.");
               }
             }
           } catch {
@@ -167,27 +167,55 @@ const session = await joinSession({
           const limit = args.limit || 10;
           const ceiling = args.ceiling ?? 1;
 
-          // Try semantic search first
-          const queryEmbedding = await getEmbedding(args.query);
-          if (queryEmbedding.length > 0) {
-            const results = graph.semanticSearch(queryEmbedding, limit, undefined, undefined, ceiling);
-            if (results.length > 0) {
-              const lines = results.map((r: any) =>
-                `[${r.distance.toFixed(3)}] ${r.node.type} | ${r.node.name} (${r.node.salience.toFixed(2)}) — ${r.node.description?.slice(0, 100)}`
-              );
-              return `Semantic search: '${args.query}' (ceiling=${ceiling})\n${lines.join("\n")}`;
+          // Primary path: FTS5 keyword search (always available)
+          const ftsResults = graph.queryByKeyword(args.query, limit, ceiling);
+
+          // If FTS5 returned enough results, skip semantic search for speed
+          if (ftsResults.length >= limit) {
+            const lines = ftsResults.map((r: any) =>
+              `[${r.score.toFixed(3)}] ${r.node.type} | ${r.node.name} (${r.node.salience.toFixed(2)}) — ${r.node.description?.slice(0, 100)}`
+            );
+            return `Search: '${args.query}' (${ftsResults.length} results, ceiling=${ceiling})\n${lines.join("\n")}`;
+          }
+
+          // Optional boost: semantic search when embeddings available
+          let semanticResults: Array<{ node: any; score: number }> = [];
+          try {
+            const queryEmbedding = await getEmbedding(args.query);
+            if (queryEmbedding.length > 0) {
+              const vecResults = graph.semanticSearch(queryEmbedding, limit, undefined, undefined, ceiling);
+              semanticResults = vecResults.map((r: any) => ({
+                node: r.node,
+                score: 1 / (1 + r.distance),
+              }));
+            }
+          } catch {
+            // Embeddings not available — that's fine
+          }
+
+          // Merge: dedup by node ID, prefer higher score
+          const merged = new Map<string, { node: any; score: number }>();
+          for (const r of ftsResults) {
+            merged.set(r.node.id, r);
+          }
+          for (const r of semanticResults) {
+            const existing = merged.get(r.node.id);
+            if (!existing || r.score > existing.score) {
+              merged.set(r.node.id, r);
             }
           }
 
-          // Fallback to FTS5 with client-side ceiling filter
-          const nodes = graph.searchNodes(args.query, limit * 2)
-            .filter((n: any) => (n.sensitivity ?? 0) <= ceiling)
+          const results = [...merged.values()]
+            .sort((a, b) => b.score - a.score)
             .slice(0, limit);
-          if (nodes.length === 0) return `No results for '${args.query}'`;
-          const lines = nodes.map((n: any) =>
-            `${n.type} | ${n.name} (${n.salience.toFixed(2)}) — ${n.description?.slice(0, 100)}`
+
+          if (results.length === 0) return `No results for '${args.query}'`;
+
+          const searchType = semanticResults.length > 0 ? 'Hybrid search' : 'Search';
+          const lines = results.map((r: any) =>
+            `[${r.score.toFixed(3)}] ${r.node.type} | ${r.node.name} (${r.node.salience.toFixed(2)}) — ${r.node.description?.slice(0, 100)}`
           );
-          return `FTS5 search: '${args.query}' (ceiling=${ceiling})\n${lines.join("\n")}`;
+          return `${searchType}: '${args.query}' (${results.length} results, ceiling=${ceiling})\n${lines.join("\n")}`;
         } catch (e: any) {
           await session.log(`myelin_query error: ${e.message}`, { level: "error" });
           return `Error: ${e.message}`;
