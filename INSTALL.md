@@ -2,23 +2,76 @@
 
 Myelin gives your Copilot CLI agents persistent, searchable memory across sessions. Install it once, and every agent automatically gets graph-backed tools, context injection, and session logging — no configuration required.
 
-**What you need:** Node.js >= 20 (22+ recommended). That's it for Tier 1.
+**What you need:** Node.js >= 20 (22+ recommended) and `gh` CLI authenticated. That's it for the package install. The npm path also requires a C++ toolchain for native modules.
 
 ---
 
-## Tier 1: Get Started (5 minutes)
+## Two Ways to Install
 
-Everything you need to give your agents memory. No extra models, no manual steps after install.
+| Method | Best for | What happens |
+|--------|----------|-------------|
+| **Package install** | Copilot CLI agents | Downloads pre-built extension + native deps only |
+| **npm global** | CLI power users, custom setups | Full npm install with all dependencies |
 
-### Alternative: Genesis Package Install
+The package method is **recommended** — it's faster, avoids common Windows install issues, and supports version tracking with automatic update checks.
 
-If you're running a [genesis](https://github.com/ianphil/genesis)-based agent, install myelin as a package:
+---
+
+## Method 1: Package Install (Recommended)
+
+### Install
+
+Your agent needs the `packages` skill to install myelin. If you already have it, skip to step 2.
+
+**Step 1: Get the packages skill**
+
+Download `packages.cjs` and `SKILL.md` from [`.github/skills/packages/`](https://github.com/shsolomo/myelin/tree/main/.github/skills/packages) into your agent's `.github/skills/packages/` directory:
+
+```bash
+# Create the directory and download the files
+mkdir -p .github/skills/packages
+cd .github/skills/packages
+gh api repos/shsolomo/myelin/contents/.github/skills/packages/packages.cjs --jq '.content' | base64 -d > packages.cjs
+gh api repos/shsolomo/myelin/contents/.github/skills/packages/SKILL.md --jq '.content' | base64 -d > SKILL.md
+cd -
+```
+
+Or clone the myelin repo and copy `.github/skills/packages/` manually.
+
+**Step 2: Install myelin**
+
+Tell your agent:
 
 ```
 > install shsolomo/myelin
 ```
 
-This downloads the pre-built extension and installs native dependencies. No global npm install needed. After install, restart your Copilot CLI session.
+That's it. Your agent now has memory.
+
+### How it works under the hood
+
+1. The packages skill fetches `.github/registry.json` from the myelin repo via `gh api`
+2. It **downloads two files** — `extension.mjs` (pre-built bundle) + `package.json` (runtime deps) — via GitHub's git blob API. Not npm.
+3. It runs `npm install --production` **inside the extension directory** — this installs only the native modules the extension needs: `better-sqlite3`, `sqlite-vec`, `onnxruntime-node`
+4. Your agent's local `.github/registry.json` is updated to track the installed version
+
+**Why this avoids the Windows install issues:** The `npm install -g` path pulls in `@huggingface/transformers`, which drags in `onnxruntime-web` (a browser runtime myelin doesn't use). That package has WebGPU symlinks that break Windows tar extraction. The package install path **never touches npm's global space** — the extension's own `package.json` is the npm root, so the `onnxruntime-web` → `onnxruntime-node` override applies correctly. No workarounds needed.
+
+### After install
+
+Restart your Copilot CLI session. The extension loads automatically — 5 tools + 3 hooks, ready to go.
+
+### Checking for updates
+
+```
+> check for updates from shsolomo/myelin
+```
+
+The packages skill compares your installed version against the latest in the myelin repo and offers to upgrade. You can also install the `upgrade` skill from `.github/skills/upgrade/` for broader update management.
+
+---
+
+## Method 2: npm Global Install
 
 ### 1. Install myelin
 
