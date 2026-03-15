@@ -1,0 +1,307 @@
+/**
+ * Tests for LLM-driven consolidation tools: prepareConsolidation() and ingestExtractions().
+ * Covers issue #59.
+ */
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { KnowledgeGraph } from '../../src/memory/graph.js';
+import {
+  prepareConsolidation,
+  ingestExtractions,
+} from '../../src/memory/replay.js';
+
+// Mock NER so extractFromEntry uses regex fallback (not needed directly, but avoids ONNX load)
+vi.mock('../../src/memory/ner.js', () => ({
+  isAvailable: () => false,
+  extractEntities: async () => [],
+}));
+
+// Mock structured-log's log directory to use our temp dir
+const TEST_DIR = join(tmpdir(), `myelin-consol-tools-${Date.now()}`);
+const AGENTS_DIR = join(TEST_DIR, 'agents');
+
+vi.mock('../../src/memory/structured-log.js', async (importOriginal) => {
+  const original = await importOriginal() as Record<string, unknown>;
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  return {
+    ...original,
+    readLogEntries: (agentName: string, options?: { sinceDate?: string }) => {
+      const logFile = path.join(AGENTS_DIR, agentName, 'log.jsonl');
+      if (!fs.existsSync(logFile)) return [];
+
+      const raw = fs.readFileSync(logFile, 'utf-8').trim();
+      if (!raw) return [];
+
+      const entries: any[] = [];
+      for (const line of raw.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          const data = JSON.parse(line);
+          const entry = {
+            ts: data.ts,
+            agent: data.agent ?? agentName,
+            type: data.type,
+            summary: data.summary,
+            detail: data.detail ?? '',
+            sessionId: data.sessionId ?? '',
+            tags: data.tags ?? [],
+            context: data.context ?? {},
+          };
+          if (options?.sinceDate && entry.ts.slice(0, 10) < options.sinceDate) continue;
+          entries.push(entry);
+        } catch { /* skip bad lines */ }
+      }
+      return entries;
+    },
+  };
+});
+
+/** Write test log entries to a mock agent log file. */
+function writeTestLog(agentName: string, entries: object[]): void {
+  const logDir = join(AGENTS_DIR, agentName);
+  mkdirSync(logDir, { recursive: true });
+  const logFile = join(logDir, 'log.jsonl');
+  const lines = entries.map(e => JSON.stringify(e)).join('\n') + '\n';
+  writeFileSync(logFile, lines, 'utf-8');
+}
+
+beforeEach(() => {
+  mkdirSync(AGENTS_DIR, { recursive: true });
+});
+
+afterEach(() => {
+  try { rmSync(TEST_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
+});
+
+// ---------------------------------------------------------------------------
+// prepareConsolidation
+// ---------------------------------------------------------------------------
+
+describe('prepareConsolidation', () => {
+  it('returns chunks from agent log entries', () => {
+    writeTestLog('test-agent', [
+      { ts: '2026-03-10T10:00:00Z', agent: 'test-agent', type: 'action', summary: 'Deployed service', detail: 'Released v2.1', tags: ['deploy'] },
+      { ts: '2026-03-10T11:00:00Z', agent: 'test-agent', type: 'decision', summary: 'Chose PostgreSQL', detail: 'Over MySQL for JSON support', tags: ['database'] },
+      { ts: '2026-03-10T12:00:00Z', agent: 'test-agent', type: 'finding', summary: 'Memory leak in auth', detail: 'Connection pool not closing', tags: ['bug'] },
+    ]);
+
+    const result = prepareConsolidation('test-agent');
+    expect(result.agentName).toBe('test-agent');
+    expect(result.totalEntries).toBe(3);
+    expect(result.chunks.length).toBeGreaterThanOrEqual(1);
+    expect(result.chunks[0].entryCount).toBe(3);
+    expect(result.chunks[0].text).toContain('Deployed service');
+    expect(result.chunks[0].text).toContain('Chose PostgreSQL');
+    expect(result.extractionPrompt).toContain('entities');
+  });
+
+  it('chunks entries by chunkSize', () => {
+    const entries = Array.from({ length: 10 }, (_, i) => ({
+      ts: `2026-03-10T${String(i + 10).padStart(2, '0')}:00:00Z`,
+      agent: 'chunky',
+      type: 'observation',
+      summary: `Entry ${i}`,
+      detail: '',
+      tags: [],
+    }));
+    writeTestLog('chunky', entries);
+
+    const result = prepareConsolidation('chunky', { chunkSize: 3 });
+    expect(result.totalEntries).toBe(10);
+    expect(result.chunks.length).toBe(4); // 3 + 3 + 3 + 1
+    expect(result.chunks[0].entryCount).toBe(3);
+    expect(result.chunks[3].entryCount).toBe(1);
+  });
+
+  it('filters by sinceDate', () => {
+    writeTestLog('dated-agent', [
+      { ts: '2026-03-08T10:00:00Z', agent: 'dated-agent', type: 'action', summary: 'Old entry', detail: '', tags: [] },
+      { ts: '2026-03-10T10:00:00Z', agent: 'dated-agent', type: 'action', summary: 'New entry', detail: '', tags: [] },
+      { ts: '2026-03-11T10:00:00Z', agent: 'dated-agent', type: 'action', summary: 'Newest entry', detail: '', tags: [] },
+    ]);
+
+    const result = prepareConsolidation('dated-agent', { sinceDate: '2026-03-10' });
+    expect(result.totalEntries).toBe(2);
+    expect(result.chunks[0].text).not.toContain('Old entry');
+    expect(result.chunks[0].text).toContain('New entry');
+  });
+
+  it('returns empty result for missing log', () => {
+    const result = prepareConsolidation('nonexistent-agent');
+    expect(result.totalEntries).toBe(0);
+    expect(result.chunks).toHaveLength(0);
+    expect(result.extractionPrompt).toBe('');
+  });
+
+  it('returns empty result for empty log', () => {
+    const logDir = join(AGENTS_DIR, 'empty-agent');
+    mkdirSync(logDir, { recursive: true });
+    writeFileSync(join(logDir, 'log.jsonl'), '', 'utf-8');
+
+    const result = prepareConsolidation('empty-agent');
+    expect(result.totalEntries).toBe(0);
+    expect(result.chunks).toHaveLength(0);
+  });
+
+  it('includes tags and detail in chunk text', () => {
+    writeTestLog('detailed-agent', [
+      { ts: '2026-03-10T10:00:00Z', agent: 'detailed-agent', type: 'decision', summary: 'Use Redis', detail: 'For session caching', tags: ['infrastructure', 'caching'] },
+    ]);
+
+    const result = prepareConsolidation('detailed-agent');
+    expect(result.chunks[0].text).toContain('Use Redis');
+    expect(result.chunks[0].text).toContain('For session caching');
+    expect(result.chunks[0].text).toContain('infrastructure');
+  });
+
+  it('extraction prompt contains entity and relationship types', () => {
+    writeTestLog('prompt-agent', [
+      { ts: '2026-03-10T10:00:00Z', agent: 'prompt-agent', type: 'action', summary: 'Test entry', detail: '', tags: [] },
+    ]);
+
+    const result = prepareConsolidation('prompt-agent');
+    expect(result.extractionPrompt).toContain('ENTITY TYPES');
+    expect(result.extractionPrompt).toContain('RELATIONSHIP TYPES');
+    expect(result.extractionPrompt).toContain('SALIENCE GUIDE');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ingestExtractions
+// ---------------------------------------------------------------------------
+
+describe('ingestExtractions', () => {
+  let graph: KnowledgeGraph;
+
+  beforeEach(() => {
+    graph = new KnowledgeGraph(':memory:');
+  });
+
+  afterEach(() => {
+    graph.close();
+  });
+
+  it('writes valid extraction to graph', () => {
+    const extraction = JSON.stringify({
+      entities: [
+        { id: 'redis-cache', type: 'tool', name: 'Redis Cache', description: 'In-memory data store', salience: 0.7, tags: ['infrastructure'] },
+        { id: 'auth-module', type: 'concept', name: 'Auth Module', description: 'JWT authentication system', salience: 0.8, tags: ['security'] },
+      ],
+      relationships: [
+        { source: 'auth-module', target: 'redis-cache', relationship: 'depends_on', description: 'Auth uses Redis for session storage' },
+      ],
+    });
+
+    const result = ingestExtractions(graph, [extraction], 'test-agent');
+    expect(result.nodesAdded).toBe(2);
+    expect(result.edgesAdded).toBeGreaterThanOrEqual(1);
+    expect(result.errors).toHaveLength(0);
+
+    // Verify nodes exist in graph
+    const redis = graph.getNode('redis-cache');
+    expect(redis).not.toBeNull();
+    expect(redis!.name).toBe('Redis Cache');
+
+    const auth = graph.getNode('auth-module');
+    expect(auth).not.toBeNull();
+    expect(auth!.name).toBe('Auth Module');
+  });
+
+  it('reinforces existing nodes instead of duplicating', () => {
+    // Pre-add a node
+    graph.addNode({ id: 'redis-cache', name: 'Redis', description: 'Cache', salience: 0.5 });
+
+    const extraction = JSON.stringify({
+      entities: [
+        { id: 'redis-cache', type: 'tool', name: 'Redis Cache', description: 'In-memory data store for caching', salience: 0.7, tags: [] },
+      ],
+      relationships: [],
+    });
+
+    const result = ingestExtractions(graph, [extraction], 'test-agent');
+    expect(result.nodesReinforced).toBe(1);
+    expect(result.nodesAdded).toBe(0);
+
+    // Verify node was reinforced (salience boosted)
+    const node = graph.getNode('redis-cache');
+    expect(node!.salience).toBeGreaterThan(0.5);
+  });
+
+  it('handles multiple extractions', () => {
+    const ext1 = JSON.stringify({
+      entities: [
+        { id: 'node-a', type: 'concept', name: 'Node A', description: 'First', salience: 0.5, tags: [] },
+      ],
+      relationships: [],
+    });
+    const ext2 = JSON.stringify({
+      entities: [
+        { id: 'node-b', type: 'concept', name: 'Node B', description: 'Second', salience: 0.6, tags: [] },
+      ],
+      relationships: [],
+    });
+
+    const result = ingestExtractions(graph, [ext1, ext2], 'test-agent');
+    expect(result.nodesAdded).toBe(2);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('handles malformed JSON gracefully', () => {
+    const result = ingestExtractions(graph, ['not valid json {}}}'], 'test-agent');
+    // parseLlmExtraction handles bad JSON by returning empty extraction
+    // So no nodes added but also no thrown errors
+    expect(result.nodesAdded).toBe(0);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('handles mixed valid and invalid extractions', () => {
+    const validExt = JSON.stringify({
+      entities: [
+        { id: 'valid-node', type: 'concept', name: 'Valid', description: 'Works', salience: 0.5, tags: [] },
+      ],
+      relationships: [],
+    });
+
+    const result = ingestExtractions(graph, [validExt, '{bad json'], 'test-agent');
+    expect(result.nodesAdded).toBe(1);
+    // Invalid JSON returns empty extraction (not an error)
+    expect(graph.getNode('valid-node')).not.toBeNull();
+  });
+
+  it('sets namespace on new nodes', () => {
+    const extraction = JSON.stringify({
+      entities: [
+        { id: 'namespaced', type: 'concept', name: 'Namespaced Node', description: 'Test', salience: 0.5, tags: [] },
+      ],
+      relationships: [],
+    });
+
+    ingestExtractions(graph, [extraction], 'hebb');
+
+    // loadExtractionToGraph sets namespace to agent-{agentName}
+    const nodes = graph.findNodes({ namespace: 'agent-hebb' });
+    expect(nodes.length).toBeGreaterThanOrEqual(1);
+    expect(nodes.some(n => n.id === 'namespaced')).toBe(true);
+  });
+
+  it('skips edges where target node does not exist', () => {
+    const extraction = JSON.stringify({
+      entities: [
+        { id: 'existing-node', type: 'concept', name: 'Exists', description: 'Present', salience: 0.5, tags: [] },
+      ],
+      relationships: [
+        { source: 'existing-node', target: 'missing-node', relationship: 'depends_on', description: 'Edge to nowhere' },
+      ],
+    });
+
+    const result = ingestExtractions(graph, [extraction], 'test-agent');
+    expect(result.nodesAdded).toBe(1);
+    // Edge should be skipped because 'missing-node' doesn't exist
+    const edges = graph.getEdges('existing-node');
+    expect(edges.filter(e => e.targetId === 'missing-node')).toHaveLength(0);
+  });
+});

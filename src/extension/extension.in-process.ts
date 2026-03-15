@@ -4,7 +4,7 @@
  * This is the SOURCE file that gets bundled by esbuild into a single extension.mjs.
  * It imports myelin's graph library directly — no subprocess spawning.
  *
- * Tools: myelin_query, myelin_boot, myelin_log, myelin_show, myelin_stats
+ * Tools: myelin_query, myelin_boot, myelin_log, myelin_show, myelin_stats, myelin_consolidate
  * Hooks: onSessionStart (boot prompt + tool guidance), onSessionEnd (auto-log),
  *        onErrorOccurred (resilience)
  */
@@ -17,6 +17,7 @@ import { joinSession } from "@github/copilot-sdk/extension";
 import { KnowledgeGraph } from "../memory/graph.js";
 import { getBootContext, resolveAgent, appendStructuredLog } from "../memory/agents.js";
 import { getEmbedding } from "../memory/embeddings.js";
+import { prepareConsolidation, ingestExtractions, remRefine, runIntegrityChecks } from "../memory/replay.js";
 
 const WORKING_MEMORY = join(homedir(), ".copilot", ".working-memory");
 const DB_PATH = join(WORKING_MEMORY, "graph.db");
@@ -345,6 +346,115 @@ const session = await joinSession({
         } finally {
           graph.close();
         }
+      },
+    },
+    {
+      name: "myelin_consolidate",
+      description:
+        "Run LLM-driven memory consolidation. Use mode 'prepare' to read pending agent logs and get extraction schema, 'ingest' to write LLM extraction results to the graph, 'complete' to run decay/prune cleanup.",
+      parameters: {
+        type: "object",
+        properties: {
+          mode: {
+            type: "string",
+            enum: ["prepare", "ingest", "complete"],
+            description: "prepare: read logs + get schema, ingest: write extractions to graph, complete: REM decay/prune",
+          },
+          agent: {
+            type: "string",
+            description: "Agent name (required for prepare mode)",
+          },
+          extractions: {
+            type: "array",
+            items: { type: "string" },
+            description: "JSON extraction results from LLM (required for ingest mode)",
+          },
+        },
+        required: ["mode"],
+      },
+      handler: async (args: any) => {
+        if (args.mode === "prepare") {
+          const agent = args.agent || sessionAgent || "default";
+          try {
+            const result = prepareConsolidation(agent, { dbPath: DB_PATH });
+            if (result.totalEntries === 0) {
+              return `No pending log entries for agent '${agent}'.`;
+            }
+            const chunkSummaries = result.chunks.map((c: any, i: number) =>
+              `--- Chunk ${i + 1} (${c.entryCount} entries) ---\n${c.text}`
+            ).join("\n\n");
+            return [
+              `Consolidation prepared for '${agent}': ${result.totalEntries} entries in ${result.chunks.length} chunks.`,
+              "",
+              "## Extraction Schema",
+              "",
+              result.extractionPrompt,
+              "",
+              "## Log Chunks",
+              "",
+              chunkSummaries,
+              "",
+              "Instructions: For each chunk above, extract entities and relationships using the schema. Then call myelin_consolidate with mode='ingest' and pass the JSON extractions array.",
+            ].join("\n");
+          } catch (e: any) {
+            return `Error preparing consolidation: ${e.message}`;
+          }
+        }
+
+        if (args.mode === "ingest") {
+          if (!args.extractions || !Array.isArray(args.extractions) || args.extractions.length === 0) {
+            return "Error: 'extractions' array is required for ingest mode.";
+          }
+          const graph = getGraph();
+          if (!graph) return "No graph database found. Run `myelin init` first.";
+
+          try {
+            const agent = args.agent || sessionAgent || "default";
+            const result = ingestExtractions(graph, args.extractions, agent);
+            const lines = [
+              `Ingestion complete:`,
+              `  Nodes added: ${result.nodesAdded}`,
+              `  Nodes reinforced: ${result.nodesReinforced}`,
+              `  Edges added: ${result.edgesAdded}`,
+            ];
+            if (result.errors.length > 0) {
+              lines.push(`  Errors (${result.errors.length}):`);
+              for (const err of result.errors) {
+                lines.push(`    - ${err}`);
+              }
+            }
+            return lines.join("\n");
+          } catch (e: any) {
+            return `Error ingesting extractions: ${e.message}`;
+          } finally {
+            graph.close();
+          }
+        }
+
+        if (args.mode === "complete") {
+          const graph = getGraph();
+          if (!graph) return "No graph database found. Run `myelin init` first.";
+
+          try {
+            const rem = remRefine(graph);
+            const integrity = runIntegrityChecks(graph);
+            return [
+              `REM refinement complete:`,
+              `  Nodes decayed: ${rem.nodesDecayed}`,
+              `  Nodes pruned: ${rem.nodesPruned}`,
+              `  Edges pruned: ${rem.edgesPruned}`,
+              `Integrity checks:`,
+              `  Orphan edges removed: ${integrity.orphanEdgesRemoved}`,
+              `  Salience values clamped: ${integrity.salienceClamped}`,
+            ].join("\n");
+          } catch (e: any) {
+            return `Error in REM refinement: ${e.message}`;
+          } finally {
+            graph.close();
+          }
+        }
+
+        return `Unknown mode '${args.mode}'. Use 'prepare', 'ingest', or 'complete'.`;
       },
     },
   ],

@@ -7,17 +7,19 @@
 
 import { readFileSync, existsSync, writeFileSync, unlinkSync, copyFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, basename } from "node:path";
-import type { KnowledgeGraph, Node, Edge } from "./graph.js";
-import { NodeType } from "./graph.js";
+import { homedir } from "node:os";
+import type { Node, Edge } from "./graph.js";
+import { KnowledgeGraph, NodeType } from "./graph.js";
 import type { LogEntry } from "./log-parser.js";
 import { parseLogFile, entriesSince } from "./log-parser.js";
-import { toLogEntries } from "./structured-log.js";
+import { toLogEntries, readLogEntries } from "./structured-log.js";
 import type { StructuredLogEntry } from "./structured-log.js";
 import { extractFromEntry } from "./extractors.js";
 import {
   parseLlmExtraction,
   loadExtractionToGraph,
 } from "./extractors.js";
+import { getLlmExtractionPrompt } from "./vocabulary.js";
 import { scoreEntry } from "./salience.js";
 
 export interface QuarantinedEntry {
@@ -307,6 +309,133 @@ export function rotateBackups(dbPath: string, maxAgeDays: number = 7): number {
   } catch {
     return 0;
   }
+}
+
+// ── LLM-driven consolidation helpers ──────────────────────────────────────
+
+export interface ConsolidationChunk {
+  text: string;
+  entryCount: number;
+}
+
+export interface ConsolidationPrepareResult {
+  agentName: string;
+  totalEntries: number;
+  chunks: ConsolidationChunk[];
+  extractionPrompt: string;
+}
+
+export interface IngestResult {
+  nodesAdded: number;
+  nodesReinforced: number;
+  edgesAdded: number;
+  errors: string[];
+}
+
+/**
+ * Read an agent's pending logs and return them as text chunks
+ * with the extraction schema for LLM-driven consolidation.
+ */
+export function prepareConsolidation(
+  agentName: string,
+  options?: { sinceDate?: string; chunkSize?: number; dbPath?: string },
+): ConsolidationPrepareResult {
+  const chunkSize = options?.chunkSize ?? 8;
+
+  // Read the agent's structured log
+  const entries = readLogEntries(agentName, {
+    sinceDate: options?.sinceDate,
+  });
+
+  if (entries.length === 0) {
+    return {
+      agentName,
+      totalEntries: 0,
+      chunks: [],
+      extractionPrompt: '',
+    };
+  }
+
+  // Chunk entries into batches
+  const chunks: ConsolidationChunk[] = [];
+  for (let i = 0; i < entries.length; i += chunkSize) {
+    const batch = entries.slice(i, i + chunkSize);
+    const text = batch
+      .map((e) => {
+        const parts = [`[${e.ts}] ${e.type}: ${e.summary}`];
+        if (e.detail) parts.push(e.detail);
+        if (e.tags.length > 0) parts.push(`Tags: ${e.tags.join(', ')}`);
+        return parts.join('\n');
+      })
+      .join('\n\n---\n\n');
+    chunks.push({ text, entryCount: batch.length });
+  }
+
+  // Get existing entity names from graph for linking context
+  let existingEntities: string[] = [];
+  if (options?.dbPath && existsSync(options.dbPath)) {
+    try {
+      const graph = new KnowledgeGraph(options.dbPath);
+      try {
+        const nodes = graph.findNodes({ limit: 200, minSalience: 0.3 });
+        existingEntities = nodes.map((n: Node) => `${n.name} (${n.type})`);
+      } finally {
+        graph.close();
+      }
+    } catch {
+      // Graph not accessible — skip entity context
+    }
+  }
+
+  // Generate extraction prompt using first chunk as example text
+  const extractionPrompt = getLlmExtractionPrompt(
+    chunks[0].text,
+    existingEntities.length > 0 ? existingEntities : undefined,
+  );
+
+  return {
+    agentName,
+    totalEntries: entries.length,
+    chunks,
+    extractionPrompt,
+  };
+}
+
+/**
+ * Ingest LLM extraction results into the knowledge graph.
+ * Thin wrapper around parseLlmExtraction + loadExtractionToGraph + applySensitivity.
+ */
+export function ingestExtractions(
+  graph: KnowledgeGraph,
+  extractions: string[],
+  agentName: string,
+): IngestResult {
+  const result: IngestResult = {
+    nodesAdded: 0,
+    nodesReinforced: 0,
+    edgesAdded: 0,
+    errors: [],
+  };
+
+  const namespace = `agent-${agentName}`;
+
+  for (let i = 0; i < extractions.length; i++) {
+    try {
+      const extraction = parseLlmExtraction(extractions[i], agentName);
+      applySensitivity(extraction);
+
+      const stats = loadExtractionToGraph(graph, extraction, true, namespace);
+      result.nodesAdded += stats.nodesAdded;
+      result.nodesReinforced += stats.nodesReinforced;
+      result.edgesAdded += stats.edgesAdded;
+    } catch (err) {
+      result.errors.push(
+        `extraction[${i}]: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  return result;
 }
 
 // ── Integrity checks ─────────────────────────────────────────────────────
