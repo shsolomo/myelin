@@ -55,7 +55,7 @@ That's it. Your agent now has memory.
 3. It runs `npm install --production` **inside the extension directory** — this installs only the native modules the extension needs: `better-sqlite3`, `sqlite-vec`, `onnxruntime-node`
 4. Your agent's local `.github/registry.json` is updated to track the installed version
 
-**Why this avoids the Windows install issues:** The `npm install -g` path pulls in `@huggingface/transformers`, which drags in `onnxruntime-web` (a browser runtime myelin doesn't use). That package has WebGPU symlinks that break Windows tar extraction. The package install path **never touches npm's global space** — the extension's own `package.json` is the npm root, so the `onnxruntime-web` → `onnxruntime-node` override applies correctly. No workarounds needed.
+**Why this avoids the Windows install issues:** The `npm install -g` path requires building all dependencies from source, which can fail due to native module compilation issues on Windows. The package install path **never touches npm's global space** — it downloads pre-built files directly from the repo and installs native dependencies locally in the extension directory.
 
 ### After install
 
@@ -320,7 +320,7 @@ myelin sleep                      # consolidates + embeds everything
 # or just embeddings:
 myelin embed
 ```
-The embedding model (all-MiniLM-L6-v2, ~80MB) downloads on first use and is cached at `~/.cache/huggingface/`.
+The embedding model (all-MiniLM-L6-v2, ~90MB) downloads on first use and is cached at `~/.cache/myelin/models/embeddings/`.
 
 #### Extension not loaded
 1. Verify the extension exists: check for `~/.copilot/extensions/myelin/extension.mjs`
@@ -336,29 +336,6 @@ If `npm install -g github:shsolomo/myelin` fails, try these workarounds:
 
 <details>
 <summary>Common failure modes</summary>
-
-#### Windows: `ENOENT spawn cmd.exe` or TAR_ENTRY_ERROR (onnxruntime-web)
-
-`@huggingface/transformers` has a hard dependency on `onnxruntime-web` (a browser runtime myelin doesn't use). Its package contains symlinks and WebGPU directory structures that fail during tar extraction on Windows, which can cascade into native module build failures (`ENOENT spawn cmd.exe`).
-
-Myelin's `package.json` includes an `overrides` field that aliases `onnxruntime-web` → `onnxruntime-node`, but npm only applies overrides from the **root project** — during `npm install -g`, the global npm space is root, so the override is ignored.
-
-**Workaround — add the override to your global npm config:**
-
-Create or edit the `package.json` at your global npm prefix (find it with `npm prefix -g`):
-
-```json
-{
-  "overrides": {
-    "onnxruntime-web": "npm:onnxruntime-node@>=1.21.0"
-  }
-}
-```
-
-Then retry:
-```bash
-npm install -g github:shsolomo/myelin
-```
 
 #### Peer dependency conflict (tree-sitter-bicep)
 ```

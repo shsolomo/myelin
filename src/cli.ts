@@ -5,7 +5,6 @@ import { createRequire } from 'node:module';
 if (!globalThis.require) { globalThis.require = createRequire(import.meta.url); }
 
 // Suppress model loading progress bars
-process.env.TRANSFORMERS_NO_ADVISORY_WARNINGS = '1';
 process.env.HF_HUB_DISABLE_PROGRESS_BARS = '1';
 
 import { program } from 'commander';
@@ -1342,7 +1341,6 @@ program
       dependencies: {
         'better-sqlite3': '^12.0.0',
         'sqlite-vec': '^0.1.6',
-        '@huggingface/transformers': '^3.0.0',
         'onnxruntime-node': '^1.21.0',
       },
     };
@@ -1367,9 +1365,10 @@ program
       console.log(chalk.yellow('   GLiNER download failed — NER will use regex fallback'));
     }
     try {
-      const { getEmbedding } = await import('./memory/embeddings.js');
-      await getEmbedding('warmup');
-      console.log(chalk.green('   Embedding model downloaded'));
+      const { ensureEmbeddingModel } = await import('./memory/embeddings.js');
+      const result = await ensureEmbeddingModel();
+      if (result) console.log(chalk.green('   Embedding model downloaded'));
+      else console.log(chalk.yellow('   Embedding download failed — will retry on first use'));
     } catch {
       console.log(chalk.yellow('   Embedding download failed — will retry on first use'));
     }

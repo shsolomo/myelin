@@ -1,14 +1,14 @@
 /**
- * Zero-shot NER via GLiNER ONNX  pure TypeScript inference.
+ * Zero-shot NER via GLiNER ONNX — pure TypeScript inference.
  *
- * Uses onnxruntime-node for model inference and @huggingface/transformers
+ * Uses onnxruntime-node for model inference and a custom Unigram tokenizer
  * for DeBERTa v2 tokenization. No Python dependency at runtime.
  *
  * The ONNX model is pre-exported from urchade/gliner_small-v2.1 and lives
  * in models/gliner/. See scripts/export-gliner.py for the export process.
  *
  * Lazy-loads on first call. If model files or dependencies are missing,
- * isAvailable() returns false and extractEntities returns []  callers
+ * isAvailable() returns false and extractEntities returns [] — callers
  * should fall back to the regex path.
  */
 
@@ -16,6 +16,7 @@ import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { NER_LABELS } from "./vocabulary.js";
+import { loadTokenizer, type Tokenizer } from "./tokenizer.js";
 
 /** A single entity extracted by NER. */
 export interface NEREntity {
@@ -44,7 +45,7 @@ const MODEL_FILES = ['model.onnx', 'tokenizer.json', 'gliner_config.json', 'toke
 
 interface GlinerSession {
   session: import("onnxruntime-node").InferenceSession;
-  tokenizer: any; // AutoTokenizer from @huggingface/transformers
+  tokenizer: Tokenizer;
   entTokenId: number;
   sepMarkerId: number;
   clsTokenId: number;
@@ -93,18 +94,15 @@ async function loadGliner(): Promise<GlinerSession | null> {
 
   try {
     const ort = await import("onnxruntime-node");
-    const { AutoTokenizer } = await import("@huggingface/transformers");
 
     const session = await ort.InferenceSession.create(join(modelDir, "model.onnx"), {
       executionProviders: ["cpu"],
     });
 
-    const tokenizer = await AutoTokenizer.from_pretrained(modelDir, {
-      local_files_only: true,
-    });
+    const tokenizer = await loadTokenizer(join(modelDir, "tokenizer.json"));
 
     // Resolve special token IDs from the vocabulary
-    const vocab: Map<string, number> = tokenizer.model.tokens_to_ids;
+    const vocab = tokenizer.vocab;
     const entTokenId = vocab.get("<<ENT>>");
     const sepMarkerId = vocab.get("<<SEP>>");
     const clsTokenId = vocab.get("[CLS]");
@@ -168,7 +166,7 @@ function buildInputIds(
   for (const label of labels) {
     inputIds.push(g.entTokenId);
     const encoded: number[] = g.tokenizer.encode(label, {
-      add_special_tokens: false,
+      addSpecialTokens: false,
     });
     inputIds.push(...encoded);
   }
@@ -179,7 +177,7 @@ function buildInputIds(
   for (const word of words) {
     wordSubtokenStarts.push(inputIds.length);
     const encoded: number[] = g.tokenizer.encode(word, {
-      add_special_tokens: false,
+      addSpecialTokens: false,
     });
     inputIds.push(...encoded);
   }

@@ -13,7 +13,7 @@
  * This is the "Tier 3+" approach: NER + embedding-based relationship
  * extraction, fully local. Uses only models already shipped with myelin:
  *   - GLiNER (onnxruntime-node) for NER (optional — degrades gracefully)
- *   - all-MiniLM-L6-v2 (@huggingface/transformers) for embeddings
+ *   - all-MiniLM-L6-v2 (onnxruntime-node) for embeddings
  */
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';

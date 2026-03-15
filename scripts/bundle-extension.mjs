@@ -22,7 +22,6 @@ const requirePackages = [
   "better-sqlite3",
   "sqlite-vec",
   "onnxruntime-node",
-  "@huggingface/transformers",
   "@github/copilot-sdk",
   "@github/copilot-sdk/extension",
 ];

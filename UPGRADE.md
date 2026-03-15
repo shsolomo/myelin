@@ -38,6 +38,23 @@ myelin doctor       # check everything is healthy
 
 ## Version History
 
+### v0.7.3 — Drop @huggingface/transformers
+
+**Upgrade action:** Run `myelin update` (or `git pull && npm run build && myelin setup-extension`). The embedding model will re-download to a new cache location (`~/.cache/myelin/models/embeddings/`) on first use.
+
+**What changed:**
+
+- **Removed `@huggingface/transformers` dependency** — This package dragged in `onnxruntime-web` which caused Windows install failures (symlinks, WebGPU directory structures breaking tar extraction). Myelin now uses `onnxruntime-node` directly for both NER and embedding inference.
+- **Custom tokenizer module** — Pure TypeScript implementation of WordPiece (for embeddings) and Unigram (for NER) tokenization. Reads the standard HuggingFace `tokenizer.json` format. No external tokenizer dependencies.
+- **Embedding model auto-downloads** — The all-MiniLM-L6-v2 ONNX model now downloads from HuggingFace on first use, cached at `~/.cache/myelin/models/embeddings/`. Same pattern as GLiNER model download.
+- **Removed `overrides` workaround** — The `onnxruntime-web → onnxruntime-node` override in `package.json` is no longer needed and has been removed.
+- **Simpler extension package** — The extension's `package.json` no longer needs `@huggingface/transformers` or the `overrides` section.
+
+**Breaking changes:**
+- Embedding model cache location changed from `~/.cache/huggingface/` to `~/.cache/myelin/models/embeddings/` (auto-downloaded, no manual action needed)
+
+---
+
 ### v0.7.0 — Model Auto-Download & Cleanup
 
 **Upgrade action:** Run `myelin update` (or `git pull && npm run build && myelin setup-extension`). Re-running `setup-extension` downloads the new models automatically (~660MB one-time).
