@@ -38,6 +38,24 @@ myelin doctor       # check everything is healthy
 
 ## Version History
 
+### v0.9.0 — Zero ML Dependencies
+
+**Upgrade action:** Run `myelin update` (or `git pull && npm install --legacy-peer-deps && npm run build && myelin setup-extension`).
+
+**What changed:**
+
+- **ONNX runtime fully removed** (#62) — `onnxruntime-node` is no longer a dependency (not even optional). GLiNER NER model, local embedding inference, and the custom tokenizer module are all removed. Code preserved on `archive/onnx-local-inference` branch.
+- **LLM-driven consolidation** (#59) — New `myelin_consolidate` extension tool with three modes: `prepare` (read logs), `ingest` (write LLM extraction results to graph), `complete` (REM decay/prune). The host LLM is now the extraction engine.
+- **Version string fixed** — `myelin --version` now reads from `package.json` dynamically instead of showing a hardcoded value.
+- **Embed skip message** — `myelin embed` now prints a clear message when no embedding model is available, confirming FTS5 is active.
+
+**Breaking changes:**
+- `onnxruntime-node` is gone entirely — no `--with-models` flag, no local NER, no local embeddings
+- Users who had local models installed will need to rely on FTS5 search and LLM consolidation
+- Future: optional local ONNX inference and configurable embedding APIs planned for Phase 4 (#63)
+
+---
+
 ### v0.8.0 — LLM-First Architecture
 
 **Upgrade action:** Run `myelin update` (or `git pull && npm install --legacy-peer-deps && npm run build && myelin setup-extension`).
