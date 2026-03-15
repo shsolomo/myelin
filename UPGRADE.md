@@ -13,7 +13,7 @@ myelin update
 This single command:
 1. Pulls the latest version from GitHub
 2. Rebuilds the Copilot CLI extension
-3. Downloads any new models (if applicable)
+3. Downloads any new models (if `--with-models` was used previously)
 
 Restart Copilot CLI (or `/clear`) after upgrading.
 
@@ -37,6 +37,27 @@ myelin doctor       # check everything is healthy
 ---
 
 ## Version History
+
+### v0.8.0 — LLM-First Architecture
+
+**Upgrade action:** Run `myelin update` (or `git pull && npm install --legacy-peer-deps && npm run build && myelin setup-extension`).
+
+**What changed:**
+
+- **@huggingface/transformers removed** (#55) — Replaced with a custom pure-TypeScript tokenizer (WordPiece + Unigram) and direct onnxruntime-node inference. Eliminates the onnxruntime-web/sharp dependency chain that caused Windows install failures.
+- **FTS5 keyword search is now primary** (#58) — `myelin_query` uses FTS5 first, with semantic vector search as an optional boost when embeddings are available. The graph works fully without embeddings.
+- **onnxruntime-node is now optional** (#61) — Moved to `optionalDependencies`. Install no longer requires a C++ toolchain for ONNX. Model downloads are opt-in via `myelin setup-extension --with-models`.
+- **GLiNER model ID fixed** — Corrected HuggingFace model ID from `shsolomo` to `shsolo`.
+- **Cron auto-registration removed** (#54) — Extension no longer auto-creates NREM/REM cron jobs on session start. Cron setup is managed externally.
+- **CI automation** (#57) — GitHub Actions pipeline with cross-platform testing (Linux, Windows, macOS × Node 20, 22). Genesis package integration for distribution.
+
+**Breaking changes:**
+- `myelin setup-extension` no longer downloads models by default. Use `--with-models` to download GLiNER and embedding models.
+- Users who relied on automatic semantic search will need to explicitly download models or accept FTS5 keyword search.
+
+**Install size reduced:** Default install no longer requires ~700MB of model downloads.
+
+---
 
 ### v0.7.3 — Drop @huggingface/transformers
 
