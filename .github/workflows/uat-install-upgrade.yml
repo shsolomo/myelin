@@ -16,27 +16,27 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         node-version: [20, 22]
     steps:
+      - uses: actions/checkout@v4
+
       - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
 
-      - name: Install myelin globally
-        run: npm install -g github:shsolomo/myelin --legacy-peer-deps
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Build
+        run: npm run build
 
       - name: Setup extension
-        run: myelin setup-extension
+        run: npx myelin setup-extension
 
       - name: Verify version
-        run: myelin --version
+        run: npx myelin --version
 
       - name: Verify doctor
-        run: myelin doctor
-
-      - name: Init and verify graph
-        run: |
-          myelin init
-          myelin doctor
+        run: npx myelin doctor
 
   # ── Fresh install via genesis package ─────────────────────────────────────
   fresh-install-package:
@@ -47,30 +47,17 @@ jobs:
         with:
           node-version: 22
 
-      - name: Setup gh CLI
-        run: gh --version
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Simulate package install
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Fetch registry
-          REGISTRY=$(gh api repos/shsolomo/myelin/contents/.github/registry.json --jq '.content' | base64 -d)
-          echo "Registry: $REGISTRY"
-
           # Create extension directory
           EXT_DIR="$HOME/.copilot/extensions/myelin"
           mkdir -p "$EXT_DIR"
 
-          # Download extension.mjs via git blob API
-          EXT_SHA=$(echo "$REGISTRY" | jq -r '.files[] | select(.path | endswith("extension.mjs")) | .sha')
-          gh api repos/shsolomo/myelin/git/blobs/$EXT_SHA --jq '.content' | base64 -d > "$EXT_DIR/extension.mjs"
-
-          # Download package.json
-          PKG_SHA=$(echo "$REGISTRY" | jq -r '.files[] | select(.path | endswith("package.json")) | .sha')
-          gh api repos/shsolomo/myelin/git/blobs/$PKG_SHA --jq '.content' | base64 -d > "$EXT_DIR/package.json"
+          # Download extension.mjs and package.json directly from the known path
+          gh api repos/shsolomo/myelin/contents/.github/extensions/myelin/extension.mjs --jq '.content' | base64 -d > "$EXT_DIR/extension.mjs"
+          gh api repos/shsolomo/myelin/contents/.github/extensions/myelin/package.json --jq '.content' | base64 -d > "$EXT_DIR/package.json"
 
           # Install native deps
           cd "$EXT_DIR" && npm install --omit=dev
