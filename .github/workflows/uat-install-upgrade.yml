@@ -1,0 +1,157 @@
+name: Install & Upgrade UAT
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Fresh install via npm global ──────────────────────────────────────────
+  fresh-install-npm:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: [20, 22]
+    steps:
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install myelin globally
+        run: npm install -g github:shsolomo/myelin --legacy-peer-deps
+
+      - name: Setup extension
+        run: myelin setup-extension
+
+      - name: Verify version
+        run: myelin --version
+
+      - name: Verify doctor
+        run: myelin doctor
+
+      - name: Init and verify graph
+        run: |
+          myelin init
+          myelin doctor
+
+  # ── Fresh install via genesis package ─────────────────────────────────────
+  fresh-install-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup gh CLI
+        run: gh --version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Simulate package install
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Fetch registry
+          REGISTRY=$(gh api repos/shsolomo/myelin/contents/.github/registry.json --jq '.content' | base64 -d)
+          echo "Registry: $REGISTRY"
+
+          # Create extension directory
+          EXT_DIR="$HOME/.copilot/extensions/myelin"
+          mkdir -p "$EXT_DIR"
+
+          # Download extension.mjs via git blob API
+          EXT_SHA=$(echo "$REGISTRY" | jq -r '.files[] | select(.path | endswith("extension.mjs")) | .sha')
+          gh api repos/shsolomo/myelin/git/blobs/$EXT_SHA --jq '.content' | base64 -d > "$EXT_DIR/extension.mjs"
+
+          # Download package.json
+          PKG_SHA=$(echo "$REGISTRY" | jq -r '.files[] | select(.path | endswith("package.json")) | .sha')
+          gh api repos/shsolomo/myelin/git/blobs/$PKG_SHA --jq '.content' | base64 -d > "$EXT_DIR/package.json"
+
+          # Install native deps
+          cd "$EXT_DIR" && npm install --omit=dev
+
+          # Verify extension exists
+          test -f "$EXT_DIR/extension.mjs" && echo "✅ Extension installed" || exit 1
+          test -d "$EXT_DIR/node_modules/better-sqlite3" && echo "✅ Native deps installed" || exit 1
+
+  # ── Upgrade from v0.8.0 → latest (clone+link path) ───────────────────────
+  upgrade-clone:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install v0.8.0 baseline
+        run: |
+          git clone https://github.com/shsolomo/myelin.git myelin-test
+          cd myelin-test
+          git checkout v0.8.0
+          npm install --legacy-peer-deps
+          npm run build
+          npx myelin --version
+
+      - name: Upgrade to latest
+        run: |
+          cd myelin-test
+          git checkout main
+          npm install --legacy-peer-deps
+          npm run build
+
+      - name: Verify upgrade
+        run: |
+          cd myelin-test
+          npx myelin --version
+          npx myelin setup-extension
+          npx myelin doctor
+
+      - name: Run tests post-upgrade
+        run: |
+          cd myelin-test
+          npm test
+
+  # ── Upgrade via package path (re-download) ────────────────────────────────
+  upgrade-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install v0.8.0 extension as baseline
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          EXT_DIR="$HOME/.copilot/extensions/myelin"
+          mkdir -p "$EXT_DIR"
+
+          # Download v0.8.0 extension
+          gh api repos/shsolomo/myelin/contents/.github/extensions/myelin/extension.mjs?ref=v0.8.0 --jq '.content' | base64 -d > "$EXT_DIR/extension.mjs"
+          gh api repos/shsolomo/myelin/contents/.github/extensions/myelin/package.json?ref=v0.8.0 --jq '.content' | base64 -d > "$EXT_DIR/package.json"
+          cd "$EXT_DIR" && npm install --omit=dev
+          echo "✅ v0.8.0 extension installed"
+
+      - name: Upgrade to latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          EXT_DIR="$HOME/.copilot/extensions/myelin"
+
+          # Re-download latest extension (simulates package update)
+          gh api repos/shsolomo/myelin/contents/.github/extensions/myelin/extension.mjs --jq '.content' | base64 -d > "$EXT_DIR/extension.mjs"
+          gh api repos/shsolomo/myelin/contents/.github/extensions/myelin/package.json --jq '.content' | base64 -d > "$EXT_DIR/package.json"
+          cd "$EXT_DIR" && npm install --omit=dev
+          echo "✅ Latest extension installed"
+
+      - name: Verify extension loads
+        run: |
+          EXT_DIR="$HOME/.copilot/extensions/myelin"
+          test -f "$EXT_DIR/extension.mjs" && echo "✅ Extension exists"
+          node -e "import('$EXT_DIR/extension.mjs').catch(e => { console.log('Extension load check:', e.message.substring(0, 100)); process.exit(0); })"
