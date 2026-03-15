@@ -111,7 +111,7 @@ function ensureGraphDb(dbOpt?: string): string {
 program
   .name('myelin')
   .description('Knowledge graph memory system — semantic search, NER extraction, brain-inspired consolidation.')
-  .version('0.1.0');
+  .version(createRequire(import.meta.url)('../package.json').version);
 
 // ── Graph commands ───────────────────────────────────────────────────────────
 
@@ -634,7 +634,15 @@ program
     if (count > 0) {
       console.log(`${chalk.green('✅')} Embedded ${count} nodes`);
     } else {
-      console.log('No nodes to embed (all already embedded or model unavailable)');
+      const isModelAvailable = (await import('./memory/embeddings.js')).isAvailable;
+      if (!(await isModelAvailable())) {
+        const s = graph.embeddingStats();
+        const skipped = s.totalNodes - s.embeddedNodes;
+        console.log(chalk.yellow(`Skipped ${skipped} node(s) — no embedding model available`));
+        console.log(chalk.dim('Embeddings are optional. FTS5 keyword search is active.'));
+      } else {
+        console.log('No nodes to embed (all already embedded)');
+      }
     }
 
     const s = graph.embeddingStats();
