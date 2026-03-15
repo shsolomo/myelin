@@ -1,6 +1,6 @@
 {
   "name": "myelin",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Knowledge graph memory system for AI agents. Semantic search, NER extraction, brain-inspired consolidation.",
   "type": "module",
   "main": "dist/index.js",
