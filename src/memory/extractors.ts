@@ -4,7 +4,7 @@
  * Three extraction modes:
  * 1. NER-based (GLiNER): Zero-shot named-entity recognition. Primary path.
  * 2. Rule-based: Fast, deterministic, uses vocabulary patterns. Fallback.
- * 3. LLM-based: Rich, contextual, uses the consolidation skill. Best judgment.
+ * 3. LLM-based: Rich, contextual, uses the sleep tool. Best judgment.
  *
  * The LLM extraction produces JSON that this module parses and loads into
  * the graph. The NER/rule-based extraction provides a fallback when LLM
@@ -617,9 +617,9 @@ export function buildCodeIndex(
  * Extract entities from a log entry using NER.
  *
  * With ONNX/GLiNER removed, this returns empty results.
- * Use the myelin_consolidate extension tool for LLM-based extraction.
+ * Use the myelin_sleep extension tool for LLM-based extraction.
  *
- * @deprecated Use myelin_consolidate tool in an agent session instead.
+ * @deprecated Use myelin_sleep tool in an agent session instead.
  */
 export async function extractFromEntry(
   entry: LogEntry,

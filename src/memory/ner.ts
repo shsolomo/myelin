@@ -2,7 +2,7 @@
  * NER stub — local inference removed.
  *
  * Entity extraction now happens via the host LLM through the
- * myelin_consolidate tool. This stub preserves the public API surface
+ * myelin_sleep tool. This stub preserves the public API surface
  * so callers (extractors.ts) continue to work without changes.
  */
 
@@ -20,7 +20,7 @@ export function isAvailable(): boolean {
   return false;
 }
 
-/** Returns empty array — use LLM extraction via myelin_consolidate instead. */
+/** Returns empty array — use LLM extraction via myelin_sleep instead. */
 export async function extractEntities(
   _text?: string,
   _labels?: string[],

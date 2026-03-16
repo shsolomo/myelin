@@ -1672,7 +1672,7 @@ function getWatermark(graph, agent) {
     return null;
   }
 }
-function prepareConsolidation(agentName, options) {
+function prepareSleep(agentName, options) {
   const chunkSize = options?.chunkSize ?? 8;
   const AGENT_LOGS_DIR3 = options?.logsDir ?? join3(homedir3(), ".copilot", ".working-memory", "agents");
   let watermark = null;
@@ -1844,7 +1844,7 @@ function pruneOrphanEdges(graph) {
 // src/extension/extension.in-process.ts
 var WORKING_MEMORY = join4(homedir4(), ".copilot", ".working-memory");
 var DB_PATH = join4(WORKING_MEMORY, "graph.db");
-var MYELIN_VERSION = "0.9.0";
+var MYELIN_VERSION = "0.10.0";
 var sessionAgent = null;
 function getGraph() {
   if (!existsSync3(DB_PATH)) return null;
@@ -1895,7 +1895,7 @@ var session = await (0, import_extension.joinSession)({
           "**Tool reference:**",
           "- **myelin_query** \u2014 Search by meaning across all knowledge (code, people, decisions, patterns). Use for 'how', 'why', 'who', and conceptual questions.",
           "- **myelin_boot** \u2014 Load agent-specific context. Call with your agent name for a richer domain briefing.",
-          "- **myelin_log** \u2014 Record important decisions, findings, errors, and observations. These feed future consolidation into the graph.",
+          "- **myelin_log** \u2014 Record important decisions, findings, errors, and observations. These feed future sleep cycles into the graph.",
           "- **myelin_show** \u2014 Inspect a specific node and its connections. Use after finding a node via query to explore its edges.",
           "- **myelin_stats** \u2014 Check graph health: node/edge counts, type distribution, embedding coverage."
         );
@@ -2028,7 +2028,7 @@ ${lines.join("\n")}`;
     },
     {
       name: "myelin_log",
-      description: "Log a structured event to an agent's knowledge log. Use to record decisions, findings, errors, and observations worth remembering across sessions. These logs feed into consolidation \u2014 important events become graph knowledge.",
+      description: "Log a structured event to an agent's knowledge log. Use to record decisions, findings, errors, and observations worth remembering across sessions. These logs feed into sleep cycles \u2014 important events become graph knowledge.",
       parameters: {
         type: "object",
         properties: {
@@ -2041,7 +2041,7 @@ ${lines.join("\n")}`;
           summary: { type: "string", description: "One-line summary" },
           detail: { type: "string", description: "Extended detail or context for richer log entries" },
           tags: { type: "string", description: "Comma-separated tags" },
-          sensitivity: { type: "number", description: "Sensitivity level 0-3 (default: 0). Controls visibility during consolidation." },
+          sensitivity: { type: "number", description: "Sensitivity level 0-3 (default: 0). Controls visibility during sleep cycles." },
           sensitivity_reason: { type: "string", description: "Why this entry has elevated sensitivity (e.g., 'contains credentials', 'internal architecture')" }
         },
         required: ["agent", "type", "summary"]
@@ -2132,8 +2132,8 @@ Connections (${edges.length}):
       }
     },
     {
-      name: "myelin_consolidate",
-      description: "Run LLM-driven memory consolidation. Use mode 'prepare' to read pending agent logs and get extraction schema, 'ingest' to write LLM extraction results to the graph, 'complete' to run decay/prune cleanup.",
+      name: "myelin_sleep",
+      description: "Run LLM-driven memory sleep cycle. Use mode 'prepare' to read pending agent logs and get extraction schema, 'ingest' to write LLM extraction results to the graph, 'complete' to run decay/prune cleanup.",
       parameters: {
         type: "object",
         properties: {
@@ -2158,7 +2158,7 @@ Connections (${edges.length}):
         if (args.mode === "prepare") {
           const agent = args.agent || sessionAgent || "default";
           try {
-            const result = prepareConsolidation(agent, { dbPath: DB_PATH });
+            const result = prepareSleep(agent, { dbPath: DB_PATH });
             if (result.totalEntries === 0) {
               return `No pending log entries for agent '${agent}'.`;
             }
@@ -2167,7 +2167,7 @@ Connections (${edges.length}):
 ${c.text}`
             ).join("\n\n");
             return [
-              `Consolidation prepared for '${agent}': ${result.totalEntries} entries in ${result.chunks.length} chunks.`,
+              `Sleep prepared for '${agent}': ${result.totalEntries} entries in ${result.chunks.length} chunks.`,
               "",
               "## Extraction Schema",
               "",
@@ -2177,10 +2177,10 @@ ${c.text}`
               "",
               chunkSummaries,
               "",
-              "Instructions: For each chunk above, extract entities and relationships using the schema. Then call myelin_consolidate with mode='ingest' and pass the JSON extractions array."
+              "Instructions: For each chunk above, extract entities and relationships using the schema. Then call myelin_sleep with mode='ingest' and pass the JSON extractions array."
             ].join("\n");
           } catch (e) {
-            return `Error preparing consolidation: ${e.message}`;
+            return `Error preparing sleep cycle: ${e.message}`;
           }
         }
         if (args.mode === "ingest") {

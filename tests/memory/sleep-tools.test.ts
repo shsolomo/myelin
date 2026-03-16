@@ -1,5 +1,5 @@
 /**
- * Tests for LLM-driven consolidation tools: prepareConsolidation(), ingestExtractions(),
+ * Tests for LLM-driven sleep tools: prepareSleep(), ingestExtractions(),
  * getWatermark(), setWatermark().
  * Covers issues #59 and #65.
  */
@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { KnowledgeGraph } from '../../src/memory/graph.js';
 import {
-  prepareConsolidation,
+  prepareSleep,
   ingestExtractions,
   getWatermark,
   setWatermark,
@@ -81,10 +81,10 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// prepareConsolidation
+// prepareSleep
 // ---------------------------------------------------------------------------
 
-describe('prepareConsolidation', () => {
+describe('prepareSleep', () => {
   it('returns chunks from agent log entries', () => {
     writeTestLog('test-agent', [
       { ts: '2026-03-10T10:00:00Z', agent: 'test-agent', type: 'action', summary: 'Deployed service', detail: 'Released v2.1', tags: ['deploy'] },
@@ -92,7 +92,7 @@ describe('prepareConsolidation', () => {
       { ts: '2026-03-10T12:00:00Z', agent: 'test-agent', type: 'finding', summary: 'Memory leak in auth', detail: 'Connection pool not closing', tags: ['bug'] },
     ]);
 
-    const result = prepareConsolidation('test-agent');
+    const result = prepareSleep('test-agent');
     expect(result.agentName).toBe('test-agent');
     expect(result.totalEntries).toBe(3);
     expect(result.chunks.length).toBeGreaterThanOrEqual(1);
@@ -113,7 +113,7 @@ describe('prepareConsolidation', () => {
     }));
     writeTestLog('chunky', entries);
 
-    const result = prepareConsolidation('chunky', { chunkSize: 3 });
+    const result = prepareSleep('chunky', { chunkSize: 3 });
     expect(result.totalEntries).toBe(10);
     expect(result.chunks.length).toBe(4); // 3 + 3 + 3 + 1
     expect(result.chunks[0].entryCount).toBe(3);
@@ -127,14 +127,14 @@ describe('prepareConsolidation', () => {
       { ts: '2026-03-11T10:00:00Z', agent: 'dated-agent', type: 'action', summary: 'Newest entry', detail: '', tags: [] },
     ]);
 
-    const result = prepareConsolidation('dated-agent', { sinceDate: '2026-03-10' });
+    const result = prepareSleep('dated-agent', { sinceDate: '2026-03-10' });
     expect(result.totalEntries).toBe(2);
     expect(result.chunks[0].text).not.toContain('Old entry');
     expect(result.chunks[0].text).toContain('New entry');
   });
 
   it('returns empty result for missing log', () => {
-    const result = prepareConsolidation('nonexistent-agent');
+    const result = prepareSleep('nonexistent-agent');
     expect(result.totalEntries).toBe(0);
     expect(result.chunks).toHaveLength(0);
     expect(result.extractionPrompt).toBe('');
@@ -145,7 +145,7 @@ describe('prepareConsolidation', () => {
     mkdirSync(logDir, { recursive: true });
     writeFileSync(join(logDir, 'log.jsonl'), '', 'utf-8');
 
-    const result = prepareConsolidation('empty-agent');
+    const result = prepareSleep('empty-agent');
     expect(result.totalEntries).toBe(0);
     expect(result.chunks).toHaveLength(0);
   });
@@ -155,7 +155,7 @@ describe('prepareConsolidation', () => {
       { ts: '2026-03-10T10:00:00Z', agent: 'detailed-agent', type: 'decision', summary: 'Use Redis', detail: 'For session caching', tags: ['infrastructure', 'caching'] },
     ]);
 
-    const result = prepareConsolidation('detailed-agent');
+    const result = prepareSleep('detailed-agent');
     expect(result.chunks[0].text).toContain('Use Redis');
     expect(result.chunks[0].text).toContain('For session caching');
     expect(result.chunks[0].text).toContain('infrastructure');
@@ -166,7 +166,7 @@ describe('prepareConsolidation', () => {
       { ts: '2026-03-10T10:00:00Z', agent: 'prompt-agent', type: 'action', summary: 'Test entry', detail: '', tags: [] },
     ]);
 
-    const result = prepareConsolidation('prompt-agent');
+    const result = prepareSleep('prompt-agent');
     expect(result.extractionPrompt).toContain('ENTITY TYPES');
     expect(result.extractionPrompt).toContain('RELATIONSHIP TYPES');
     expect(result.extractionPrompt).toContain('SALIENCE GUIDE');
@@ -325,7 +325,7 @@ describe('getWatermark / setWatermark', () => {
   });
 
   it('returns null for new agent', () => {
-    const wm = getWatermark(graph, 'never-consolidated');
+    const wm = getWatermark(graph, 'never-slept');
     expect(wm).toBeNull();
   });
 
@@ -358,16 +358,16 @@ describe('getWatermark / setWatermark', () => {
 });
 
 // ---------------------------------------------------------------------------
-// prepareConsolidation — watermark and .md log support
+// prepareSleep — watermark and .md log support
 // ---------------------------------------------------------------------------
 
-describe('prepareConsolidation watermark support', () => {
+describe('prepareSleep watermark support', () => {
   it('result includes watermark field (null when no dbPath)', () => {
     writeTestLog('wm-agent', [
       { ts: '2026-03-15T10:00:00Z', agent: 'wm-agent', type: 'action', summary: 'Entry one', detail: '', tags: [] },
     ]);
 
-    const result = prepareConsolidation('wm-agent');
+    const result = prepareSleep('wm-agent');
     expect(result).toHaveProperty('watermark');
     expect(result.watermark).toBeNull();
   });
@@ -383,7 +383,7 @@ describe('prepareConsolidation watermark support', () => {
     }));
     writeTestLog('chunk-idx', entries);
 
-    const result = prepareConsolidation('chunk-idx', { chunkSize: 3, chunkIndex: 1 });
+    const result = prepareSleep('chunk-idx', { chunkSize: 3, chunkIndex: 1 });
     expect(result.totalEntries).toBe(10);
     expect(result.chunks).toHaveLength(1);
     expect(result.chunks[0].entryCount).toBe(3);
@@ -395,13 +395,13 @@ describe('prepareConsolidation watermark support', () => {
       { ts: '2026-03-15T10:00:00Z', agent: 'chunk-oob', type: 'action', summary: 'Only entry', detail: '', tags: [] },
     ]);
 
-    const result = prepareConsolidation('chunk-oob', { chunkIndex: 99 });
+    const result = prepareSleep('chunk-oob', { chunkIndex: 99 });
     expect(result.totalEntries).toBe(1);
     expect(result.chunks).toHaveLength(0);
   });
 });
 
-describe('prepareConsolidation .md log support', () => {
+describe('prepareSleep .md log support', () => {
   it('reads .md log entries', () => {
     const logDir = join(AGENTS_DIR, 'md-agent');
     mkdirSync(logDir, { recursive: true });
@@ -413,7 +413,7 @@ describe('prepareConsolidation .md log support', () => {
       'Token refresh was using stale cache. Cleared and retested.',
     ].join('\n'), 'utf-8');
 
-    const result = prepareConsolidation('md-agent', { logsDir: AGENTS_DIR });
+    const result = prepareSleep('md-agent', { logsDir: AGENTS_DIR });
     expect(result.totalEntries).toBe(2);
     expect(result.chunks[0].text).toContain('Shipped the feature');
     expect(result.chunks[0].text).toContain('Fixed the auth bug');
@@ -435,7 +435,7 @@ describe('prepareConsolidation .md log support', () => {
       'This was logged in the old .md format.',
     ].join('\n'), 'utf-8');
 
-    const result = prepareConsolidation('merge-agent', { logsDir: AGENTS_DIR });
+    const result = prepareSleep('merge-agent', { logsDir: AGENTS_DIR });
     expect(result.totalEntries).toBe(2);
     // .md entry (2026-03-14) should sort before .jsonl entry (2026-03-15)
     expect(result.chunks[0].text.indexOf('Markdown entry')).toBeLessThan(
@@ -448,7 +448,7 @@ describe('prepareConsolidation .md log support', () => {
       { ts: '2026-03-15T10:00:00Z', agent: 'no-md-agent', type: 'action', summary: 'Only JSONL', detail: '', tags: [] },
     ]);
 
-    const result = prepareConsolidation('no-md-agent', { logsDir: AGENTS_DIR });
+    const result = prepareSleep('no-md-agent', { logsDir: AGENTS_DIR });
     expect(result.totalEntries).toBe(1);
     expect(result.chunks[0].text).toContain('Only JSONL');
   });

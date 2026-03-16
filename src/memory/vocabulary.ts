@@ -144,7 +144,7 @@ const ALL_RELATIONSHIP_TYPES = Object.values(RelationshipType);
 /**
  * Generate a prompt for LLM-based entity/relationship extraction.
  *
- * This is the prompt sent to the consolidation skill's LLM layer.
+ * This is the prompt sent to the sleep tool's LLM layer.
  * The LLM handles judgment — what matters, what connects, what's novel.
  */
 export function getLlmExtractionPrompt(

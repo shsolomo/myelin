@@ -24,7 +24,7 @@ import {
 import {
   nremReplay,
   remRefine,
-  prepareConsolidation,
+  prepareSleep,
   ingestExtractions,
   getWatermark,
   setWatermark,
@@ -118,7 +118,7 @@ function ensureGraphDb(dbOpt?: string): string {
 
 program
   .name('myelin')
-  .description('Knowledge graph memory system — semantic search, NER extraction, brain-inspired consolidation.')
+  .description('Knowledge graph memory system — FTS5 search, LLM-driven sleep, brain-inspired memory.')
   .version(createRequire(import.meta.url)('../package.json').version);
 
 // ── Graph commands ───────────────────────────────────────────────────────────
@@ -666,7 +666,7 @@ program
     process.exit(0);
   });
 
-// ── Consolidation commands ───────────────────────────────────────────────────
+// ── Sleep commands ───────────────────────────────────────────────────────────
 
 program
   .command('parse-log')
@@ -700,7 +700,7 @@ program
     process.exit(0);
   });
 
-// ── Consolidate ─────────────────────────────────────────────────────────────
+// ── Sleep ─────────────────────────────────────────────────────────────
 
 function discoverAgents(): string[] {
   const agentsDir = join(homedir(), '.copilot', '.working-memory', 'agents');
@@ -775,19 +775,19 @@ async function processChunk(
   });
 }
 
-async function consolidateAgent(
+async function sleepAgent(
   agentName: string,
   graphDbPath: string | undefined,
   parallel: number,
 ): Promise<{ entities: number; relationships: number; errors: number }> {
-  const result = prepareConsolidation(agentName, { dbPath: graphDbPath });
+  const result = prepareSleep(agentName, { dbPath: graphDbPath });
   if (result.totalEntries === 0) {
     console.log(chalk.dim(`  ${agentName}: no new entries (watermark: ${result.watermark || 'none'})`));
     return { entities: 0, relationships: 0, errors: 0 };
   }
 
   console.log(
-    `  🧠 Consolidating ${chalk.bold(agentName)} (${result.chunks.length} chunks, ${result.totalEntries} entries)...`,
+    `  🧠 Processing ${chalk.bold(agentName)} (${result.chunks.length} chunks, ${result.totalEntries} entries)...`,
   );
 
   const graph = openGraph(graphDbPath);
@@ -835,7 +835,7 @@ async function consolidateAgent(
 
     // Find latest timestamp from the chunks
     const allEntries = result.chunks.reduce((sum, c) => sum + c.entryCount, 0);
-    // Use current time as watermark since we processed everything prepareConsolidation returned
+    // Use current time as watermark since we processed everything prepareSleep returned
     latestTs = new Date().toISOString();
     setWatermark(graph, agentName, latestTs, allEntries);
 
@@ -850,14 +850,14 @@ async function consolidateAgent(
 }
 
 program
-  .command('consolidate')
-  .description('Run LLM-driven memory consolidation with parallel subprocess extraction')
-  .option('-a, --agent <name>', 'Consolidate a specific agent')
-  .option('--all', 'Consolidate all agents with logs')
-  .option('--status', 'Show consolidation status per agent')
+  .command('sleep')
+  .description('Run LLM-driven memory sleep with parallel subprocess extraction')
+  .option('-a, --agent <name>', 'Process a specific agent')
+  .option('--all', 'Process all agents with logs')
+  .option('--status', 'Show sleep status per agent')
   .option('--parallel <n>', 'Max parallel extractions', '2')
   .option('--decay-rate <rate>', 'Decay rate for REM phase', '0.05')
-  .option('--embed', 'Run embedding after consolidation')
+  .option('--embed', 'Run embedding after sleep')
   .option('--db <path>', 'Path to graph.db')
   .action(async (opts: {
     agent?: string;
@@ -873,7 +873,7 @@ program
 
     // --status: show watermark + pending entries per agent
     if (opts.status) {
-      console.log(chalk.cyan.bold('\n📋 Consolidation Status\n'));
+      console.log(chalk.cyan.bold('\n📋 Sleep Status\n'));
       const agents = discoverAgents();
       if (agents.length === 0) {
         console.log(chalk.dim('  No agents with logs found.'));
@@ -883,7 +883,7 @@ program
       try {
         for (const agent of agents) {
           const wm = getWatermark(graph, agent);
-          const result = prepareConsolidation(agent, { dbPath: graphDbPath });
+          const result = prepareSleep(agent, { dbPath: graphDbPath });
           const wmDisplay = wm ? wm.slice(0, 19) + 'Z' : 'never';
           if (result.totalEntries > 0) {
             console.log(`  ${chalk.yellow('●')} ${agent}: ${result.totalEntries} pending entries (${result.chunks.length} chunks) — watermark: ${wmDisplay}`);
@@ -913,13 +913,13 @@ program
       return; // unreachable, but helps TS
     }
 
-    console.log(chalk.cyan.bold(`\n🧠 NREM Consolidation — ${agents.length} agent(s), parallel=${parallel}\n`));
+    console.log(chalk.cyan.bold(`\n🌙 NREM Sleep — ${agents.length} agent(s), parallel=${parallel}\n`));
 
     let grandEntities = 0;
     let grandRelationships = 0;
     let grandErrors = 0;
     for (const agent of agents) {
-      const r = await consolidateAgent(agent, graphDbPath, parallel);
+      const r = await sleepAgent(agent, graphDbPath, parallel);
       grandEntities += r.entities;
       grandRelationships += r.relationships;
       grandErrors += r.errors;
@@ -949,53 +949,33 @@ program
       console.log(chalk.yellow(`\n⚠️  ${grandErrors} chunk(s) failed — will retry on next run`));
     }
     console.log(
-      chalk.green(`\n✅ Consolidation complete: ${grandEntities} entities, ${grandRelationships} relationships\n`),
+      chalk.green(`\n✅ Sleep complete: ${grandEntities} entities, ${grandRelationships} relationships\n`),
     );
     process.exit(0);
   });
 
-// ── Sleep ───────────────────────────────────────────────────────────────────
-
+// Hidden backward-compat alias
 program
-  .command('sleep')
-  .description('Run full maintenance — REM decay/prune and integrity checks')
-  .option('--db <path>', 'Path to graph.db')
-  .option('--embed', 'Run embedding after maintenance')
-  .action(async (opts: { db?: string; embed?: boolean }) => {
-    console.log('\n🌙 Running graph maintenance...\n');
-    console.log(chalk.dim('  Entity extraction: use `myelin consolidate --all` for LLM-driven NREM.'));
-    console.log(chalk.dim('  This command runs REM (decay/prune) only.\n'));
-
-    const graph = openGraph(opts.db);
-    try {
-      console.log('  🧹 Running REM refinement...');
-      try {
-        const rem = remRefine(graph);
-        console.log(chalk.dim(`     Decayed: ${rem.nodesDecayed} nodes`));
-        if (rem.nodesPruned > 0 || rem.edgesPruned > 0) {
-          console.log(chalk.dim(`     Pruned: ${rem.nodesPruned} nodes, ${rem.edgesPruned} edges`));
-        }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.log(chalk.yellow(`     ⚠️ REM failed: ${msg}`));
-      }
-
-      await runEmbedIfRequested(graph, opts.embed);
-
-      const graphStats = graph.stats();
-      console.log(`\n✅ Maintenance complete`);
-      console.log(
-        `📊 Graph: ${graphStats.nodeCount} nodes, ${graphStats.edgeCount} edges, avg salience ${graphStats.avgSalience.toFixed(3)}`,
-      );
-    } finally {
-      graph.close();
+  .command('consolidate', { hidden: true })
+  .description('Alias for sleep')
+  .option('-a, --agent <name>')
+  .option('--all')
+  .option('--status')
+  .option('--parallel <n>', '', '2')
+  .option('--decay-rate <rate>', '', '0.05')
+  .option('--embed')
+  .option('--db <path>')
+  .action(async (opts: any) => {
+    // Delegate to sleep command handler
+    const sleepCmd = program.commands.find((c: any) => c.name() === 'sleep');
+    if (sleepCmd) {
+      await sleepCmd.parseAsync(['node', 'myelin', 'sleep', ...process.argv.slice(3)]);
     }
-    process.exit(0);
   });
 
 program
   .command('plan')
-  .description('Generate a consolidation plan with LLM extraction prompts')
+  .description('Generate a sleep plan with LLM extraction prompts')
   .option('-a, --agent <name>', 'Agent name', 'donna')
   .option('-l, --log <path>', 'Path to log file')
   .option('-s, --since <date>', 'Process entries since date (YYYY-MM-DD)')
@@ -1041,7 +1021,7 @@ program
       .filter((s) => s.salience.combined >= 0.7)
       .map((s) => `[${s.salience.combined.toFixed(2)}] ${s.entry.heading || s.entry.content.slice(0, 50)}`);
 
-    console.log(`\n📋 Consolidation Plan — ${opts.agent}`);
+    console.log(`\n📋 Sleep Plan — ${opts.agent}`);
     console.log(`  Entries to process: ${filtered.length}`);
     console.log(`  Extraction batches: ${batches.length}`);
     console.log(`  Entry types: ${JSON.stringify(typeCounts)}`);
@@ -1117,7 +1097,7 @@ program
 
 program
   .command('report')
-  .description('Post-consolidation report with persona evolution')
+  .description('Post-sleep report with persona evolution')
   .option('-a, --agent <name>', 'Agent name', 'donna')
   .option('--db <path>', 'Path to graph.db')
   .action((opts) => {
@@ -1125,7 +1105,7 @@ program
     const graph = openGraph(opts.db);
     const s = graph.stats();
 
-    console.log(chalk.bold('\n📊 Post-Consolidation Report'));
+    console.log(chalk.bold('\n📊 Post-Sleep Report'));
     console.log(`  Agent: ${opts.agent}`);
     console.log(`  Nodes: ${s.nodeCount}`);
     console.log(`  Edges: ${s.edgeCount}`);
@@ -1522,7 +1502,7 @@ program
     console.log('   myelin_log          — structured event logging');
     console.log('   myelin_show         — node detail + edges');
     console.log('   myelin_stats        — graph statistics');
-    console.log('   myelin_consolidate  — LLM-driven memory consolidation');
+    console.log('   myelin_sleep         — LLM-driven memory sleep');
     console.log('');
     console.log(chalk.cyan('Auto hooks:'));
     console.log('   onSessionStart          — graph context injected automatically');

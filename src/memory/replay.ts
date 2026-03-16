@@ -1,5 +1,5 @@
 /**
- * NREM/REM Consolidation Pipeline — the core memory engine.
+ * NREM/REM Sleep Pipeline — the core memory engine.
  *
  * NREM: Replay → Extract → Score → Transfer (hippocampus → cortex)
  * REM:  Decay → Prune → Refine (homeostatic maintenance)
@@ -134,7 +134,7 @@ export function lockPathFor(graph: KnowledgeGraph): string {
 }
 
 /**
- * Acquire an exclusive lock for consolidation.
+ * Acquire an exclusive lock for sleep cycle.
  * Returns true if acquired, false if a recent lock exists (abort).
  * Warns and proceeds if the lock is stale (> 10 min).
  */
@@ -151,7 +151,7 @@ export function acquireLock(graph: KnowledgeGraph): { acquired: boolean; message
       if (age < LOCK_STALE_MS) {
         return {
           acquired: false,
-          message: `Consolidation already in progress (lock age: ${Math.round(age / 1000)}s). Aborting.`,
+          message: `Sleep cycle already in progress (lock age: ${Math.round(age / 1000)}s). Aborting.`,
         };
       }
       // Stale lock — warn and proceed
@@ -168,7 +168,7 @@ export function acquireLock(graph: KnowledgeGraph): { acquired: boolean; message
   return { acquired: true };
 }
 
-/** Release the consolidation lock. */
+/** Release the sleep cycle lock. */
 export function releaseLock(graph: KnowledgeGraph): void {
   const lockFile = lockPathFor(graph);
   if (!lockFile) return;
@@ -182,7 +182,7 @@ export function releaseLock(graph: KnowledgeGraph): void {
 const MAX_BACKUPS = 3;
 
 /**
- * Create a timestamped backup of graph.db before consolidation writes.
+ * Create a timestamped backup of graph.db before sleep writes.
  * Keeps the latest MAX_BACKUPS copies and removes older ones.
  * @deprecated Use backupGraph(dbPath) for new code — supports date-dedup and time-based rotation.
  */
@@ -242,7 +242,7 @@ function parseBackupTimestamp(ts: string): Date | null {
 }
 
 /**
- * Create a timestamped backup of graph.db before consolidation.
+ * Create a timestamped backup of graph.db before sleep cycle.
  *
  * Filename format: `{dbPath}.backup-{YYYYMMDDHHmmss}`
  *
@@ -311,20 +311,26 @@ export function rotateBackups(dbPath: string, maxAgeDays: number = 7): number {
   }
 }
 
-// ── LLM-driven consolidation helpers ──────────────────────────────────────
+// ── LLM-driven sleep helpers ──────────────────────────────────────────────
 
-export interface ConsolidationChunk {
+export interface SleepChunk {
   text: string;
   entryCount: number;
 }
 
-export interface ConsolidationPrepareResult {
+/** @deprecated Use SleepChunk */
+export type ConsolidationChunk = SleepChunk;
+
+export interface SleepPrepareResult {
   agentName: string;
   totalEntries: number;
-  chunks: ConsolidationChunk[];
+  chunks: SleepChunk[];
   extractionPrompt: string;
   watermark: string | null;
 }
+
+/** @deprecated Use SleepPrepareResult */
+export type ConsolidationPrepareResult = SleepPrepareResult;
 
 export interface IngestResult {
   nodesAdded: number;
@@ -333,11 +339,11 @@ export interface IngestResult {
   errors: string[];
 }
 
-// ── Watermark-based consolidation state ───────────────────────────────────
+// ── Watermark-based sleep state ───────────────────────────────────────────
 
 /**
  * Read the last consolidated timestamp for an agent.
- * Returns null if the agent has never been consolidated.
+ * Returns null if the agent has never been through a sleep cycle.
  */
 export function getWatermark(graph: KnowledgeGraph, agent: string): string | null {
   try {
@@ -351,7 +357,7 @@ export function getWatermark(graph: KnowledgeGraph, agent: string): string | nul
 }
 
 /**
- * Set the consolidation watermark for an agent.
+ * Set the sleep watermark for an agent.
  * Upserts the timestamp and cumulative entry count.
  */
 export function setWatermark(
@@ -374,12 +380,12 @@ export function setWatermark(
 
 /**
  * Read an agent's pending logs and return them as text chunks
- * with the extraction schema for LLM-driven consolidation.
+ * with the extraction schema for LLM-driven sleep cycle.
  *
  * Reads both .jsonl and .md log files. Filters by watermark if no
  * explicit sinceDate is provided and dbPath is set.
  */
-export function prepareConsolidation(
+export function prepareSleep(
   agentName: string,
   options?: {
     sinceDate?: string;
@@ -388,7 +394,7 @@ export function prepareConsolidation(
     dbPath?: string;
     logsDir?: string;
   },
-): ConsolidationPrepareResult {
+): SleepPrepareResult {
   const chunkSize = options?.chunkSize ?? 8;
   const AGENT_LOGS_DIR = options?.logsDir ?? join(homedir(), '.copilot', '.working-memory', 'agents');
 
@@ -474,7 +480,7 @@ export function prepareConsolidation(
   }
 
   // Chunk entries into batches
-  const allChunks: ConsolidationChunk[] = [];
+  const allChunks: SleepChunk[] = [];
   for (let i = 0; i < textEntries.length; i += chunkSize) {
     const batch = textEntries.slice(i, i + chunkSize);
     const text = batch.map((e) => e.text).join('\n\n---\n\n');
@@ -518,6 +524,9 @@ export function prepareConsolidation(
   };
 }
 
+/** @deprecated Use prepareSleep */
+export const prepareConsolidation = prepareSleep;
+
 /**
  * Ingest LLM extraction results into the knowledge graph.
  * Thin wrapper around parseLlmExtraction + loadExtractionToGraph + applySensitivity.
@@ -558,7 +567,7 @@ export function ingestExtractions(
 // ── Integrity checks ─────────────────────────────────────────────────────
 
 /**
- * Post-consolidation integrity check:
+ * Post-sleep integrity check:
  * 1. Remove orphan edges (edges referencing non-existent nodes)
  * 2. Clamp salience values to [0, 1] bounds
  */
@@ -584,7 +593,7 @@ export function runIntegrityChecks(graph: KnowledgeGraph): IntegrityResult {
 }
 
 /**
- * Run the NREM consolidation phase on an agent's log.
+ * Run the NREM sleep phase on an agent's log.
  */
 export async function nremReplay(
   graph: KnowledgeGraph,
@@ -798,7 +807,7 @@ export function remRefine(
 }
 
 /**
- * Run a full consolidation cycle (NREM + REM).
+ * Run a full sleep cycle (NREM + REM).
  */
 export async function runFullCycle(
   graph: KnowledgeGraph,
@@ -813,7 +822,7 @@ export async function runFullCycle(
   const nrem = await nremReplay(graph, logPath, options);
   const rem = remRefine(graph, { decayRate: options.decayRate });
 
-  // Rotate old backups after successful consolidation
+  // Rotate old backups after successful sleep cycle
   const dbName = graph.db.name;
   if (dbName && dbName !== ':memory:') {
     rotateBackups(dbName);

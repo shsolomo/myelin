@@ -1,7 +1,7 @@
 /**
  * Salience scoring — the dopamine and norepinephrine signals.
  *
- * Dopamine = importance: "this matters, consolidate it"
+ * Dopamine = importance: "this matters, remember it"
  * Norepinephrine = novelty/surprise: "this is unexpected, pay attention"
  *
  * Combined salience determines which memories get promoted to long-term
@@ -96,7 +96,7 @@ export const NOVELTY_SIGNALS: Record<string, number> = {
 /**
  * Score a log entry's salience based on text signals.
  *
- * This is the rule-based scorer. The LLM-based scorer in the consolidation
+ * This is the rule-based scorer. The LLM-based scorer in the sleep
  * skill provides richer judgment, but this gives a baseline.
  */
 export function scoreEntry(entry: LogEntry): SalienceScore {

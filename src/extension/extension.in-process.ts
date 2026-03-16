@@ -4,7 +4,7 @@
  * This is the SOURCE file that gets bundled by esbuild into a single extension.mjs.
  * It imports myelin's graph library directly — no subprocess spawning.
  *
- * Tools: myelin_query, myelin_boot, myelin_log, myelin_show, myelin_stats, myelin_consolidate
+ * Tools: myelin_query, myelin_boot, myelin_log, myelin_show, myelin_stats, myelin_sleep
  * Hooks: onSessionStart (boot prompt + tool guidance), onSessionEnd (auto-log),
  *        onErrorOccurred (resilience)
  */
@@ -17,7 +17,7 @@ import { joinSession } from "@github/copilot-sdk/extension";
 import { KnowledgeGraph } from "../memory/graph.js";
 import { getBootContext, resolveAgent, appendStructuredLog } from "../memory/agents.js";
 import { getEmbedding } from "../memory/embeddings.js";
-import { prepareConsolidation, ingestExtractions, remRefine, runIntegrityChecks } from "../memory/replay.js";
+import { prepareSleep, ingestExtractions, remRefine, runIntegrityChecks } from "../memory/replay.js";
 
 const WORKING_MEMORY = join(homedir(), ".copilot", ".working-memory");
 const DB_PATH = join(WORKING_MEMORY, "graph.db");
@@ -88,7 +88,7 @@ const session = await joinSession({
           "**Tool reference:**",
           "- **myelin_query** — Search by meaning across all knowledge (code, people, decisions, patterns). Use for 'how', 'why', 'who', and conceptual questions.",
           "- **myelin_boot** — Load agent-specific context. Call with your agent name for a richer domain briefing.",
-          "- **myelin_log** — Record important decisions, findings, errors, and observations. These feed future consolidation into the graph.",
+          "- **myelin_log** — Record important decisions, findings, errors, and observations. These feed future sleep cycles into the graph.",
           "- **myelin_show** — Inspect a specific node and its connections. Use after finding a node via query to explore its edges.",
           "- **myelin_stats** — Check graph health: node/edge counts, type distribution, embedding coverage.",
         );
@@ -248,7 +248,7 @@ const session = await joinSession({
     {
       name: "myelin_log",
       description:
-        "Log a structured event to an agent's knowledge log. Use to record decisions, findings, errors, and observations worth remembering across sessions. These logs feed into consolidation — important events become graph knowledge.",
+        "Log a structured event to an agent's knowledge log. Use to record decisions, findings, errors, and observations worth remembering across sessions. These logs feed into sleep cycles — important events become graph knowledge.",
       parameters: {
         type: "object",
         properties: {
@@ -261,7 +261,7 @@ const session = await joinSession({
           summary: { type: "string", description: "One-line summary" },
           detail: { type: "string", description: "Extended detail or context for richer log entries" },
           tags: { type: "string", description: "Comma-separated tags" },
-          sensitivity: { type: "number", description: "Sensitivity level 0-3 (default: 0). Controls visibility during consolidation." },
+          sensitivity: { type: "number", description: "Sensitivity level 0-3 (default: 0). Controls visibility during sleep cycles." },
           sensitivity_reason: { type: "string", description: "Why this entry has elevated sensitivity (e.g., 'contains credentials', 'internal architecture')" },
         },
         required: ["agent", "type", "summary"],
@@ -349,9 +349,9 @@ const session = await joinSession({
       },
     },
     {
-      name: "myelin_consolidate",
+      name: "myelin_sleep",
       description:
-        "Run LLM-driven memory consolidation. Use mode 'prepare' to read pending agent logs and get extraction schema, 'ingest' to write LLM extraction results to the graph, 'complete' to run decay/prune cleanup.",
+        "Run LLM-driven memory sleep cycle. Use mode 'prepare' to read pending agent logs and get extraction schema, 'ingest' to write LLM extraction results to the graph, 'complete' to run decay/prune cleanup.",
       parameters: {
         type: "object",
         properties: {
@@ -376,7 +376,7 @@ const session = await joinSession({
         if (args.mode === "prepare") {
           const agent = args.agent || sessionAgent || "default";
           try {
-            const result = prepareConsolidation(agent, { dbPath: DB_PATH });
+            const result = prepareSleep(agent, { dbPath: DB_PATH });
             if (result.totalEntries === 0) {
               return `No pending log entries for agent '${agent}'.`;
             }
@@ -384,7 +384,7 @@ const session = await joinSession({
               `--- Chunk ${i + 1} (${c.entryCount} entries) ---\n${c.text}`
             ).join("\n\n");
             return [
-              `Consolidation prepared for '${agent}': ${result.totalEntries} entries in ${result.chunks.length} chunks.`,
+              `Sleep prepared for '${agent}': ${result.totalEntries} entries in ${result.chunks.length} chunks.`,
               "",
               "## Extraction Schema",
               "",
@@ -394,10 +394,10 @@ const session = await joinSession({
               "",
               chunkSummaries,
               "",
-              "Instructions: For each chunk above, extract entities and relationships using the schema. Then call myelin_consolidate with mode='ingest' and pass the JSON extractions array.",
+              "Instructions: For each chunk above, extract entities and relationships using the schema. Then call myelin_sleep with mode='ingest' and pass the JSON extractions array.",
             ].join("\n");
           } catch (e: any) {
-            return `Error preparing consolidation: ${e.message}`;
+            return `Error preparing sleep cycle: ${e.message}`;
           }
         }
 

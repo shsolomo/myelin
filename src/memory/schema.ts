@@ -1,7 +1,7 @@
 /**
  * Schema DDL for the SQLite-backed knowledge graph.
  *
- * Tables: nodes, edges, node_tags, properties
+ * Tables: nodes, edges, node_tags, properties, consolidation_state (sleep watermarks)
  * FTS5 virtual table (node_fts) with INSERT/UPDATE/DELETE triggers
  * Code-graph extension columns (category, file_path, etc.)
  */
