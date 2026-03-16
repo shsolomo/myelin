@@ -7,9 +7,10 @@ if (!globalThis.require) { globalThis.require = createRequire(import.meta.url); 
 import { program } from 'commander';
 import chalk from 'chalk';
 import Table from 'cli-table3';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import Database from 'better-sqlite3';
 
 import { KnowledgeGraph, NodeType, RelationshipType } from './memory/graph.js';
@@ -20,7 +21,14 @@ import {
   appendStructuredLog,
   getAgentLogInstructions,
 } from './memory/agents.js';
-import { nremReplay, remRefine } from './memory/replay.js';
+import {
+  nremReplay,
+  remRefine,
+  prepareConsolidation,
+  ingestExtractions,
+  getWatermark,
+  setWatermark,
+} from './memory/replay.js';
 import { parseLogFile } from './memory/log-parser.js';
 import { readLogEntries, logFilePath } from './memory/structured-log.js';
 import { getEmbedding, embedAllNodes } from './memory/embeddings.js';
@@ -692,112 +700,296 @@ program
     process.exit(0);
   });
 
-program
-  .command('consolidate')
-  .description('Run memory consolidation cycle')
-  .option('-l, --log <path>', 'Path to log file (md or jsonl)')
-  .option('-a, --agent <name>', 'Agent name', 'donna')
-  .option('-p, --phase <phase>', 'Phase: nrem, rem, or both', 'both')
-  .option('-s, --since <date>', 'Process entries since date (YYYY-MM-DD)')
-  .option('--decay-rate <rate>', 'Decay rate for REM phase', '0.05')
-  .option('--embed', 'Run embedding after consolidation')
-  .option('--db <path>', 'Path to graph.db')
-  .action(async (opts) => {
-    const phase = opts.phase;
-    let logPath = resolveLogPath(opts.agent, opts.log);
+// ── Consolidate ─────────────────────────────────────────────────────────────
 
-    if (!logPath) {
-      console.log(chalk.yellow(`  ⚠️ No log found for agent '${opts.agent}' (checked JSONL and markdown)`));
-      if (phase === 'nrem') {
-        process.exit(0);
+function discoverAgents(): string[] {
+  const agentsDir = join(homedir(), '.copilot', '.working-memory', 'agents');
+  if (!existsSync(agentsDir)) return [];
+  return (readdirSync(agentsDir) as string[]).filter((name: string) => {
+    const logFile = join(agentsDir, name, 'log.jsonl');
+    return existsSync(logFile);
+  });
+}
+
+interface ChunkResult {
+  json: string | null;
+  error?: string;
+  durationMs: number;
+}
+
+async function processChunk(
+  chunkText: string,
+  promptTemplate: string,
+  index: number,
+  timeoutMs = 90_000,
+): Promise<ChunkResult> {
+  const prompt = `${promptTemplate}\n\nTEXT:\n${chunkText}\n\nReturn ONLY valid JSON.`;
+  const start = Date.now();
+
+  return new Promise((resolve) => {
+    const proc = spawn('copilot', ['-p', prompt, '--disable-builtin-mcps'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (data: Buffer) => {
+      stdout += data.toString();
+    });
+    proc.stderr.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    const timer = setTimeout(() => {
+      proc.kill();
+      resolve({ json: null, error: 'timeout', durationMs: Date.now() - start });
+    }, timeoutMs);
+
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      const durationMs = Date.now() - start;
+      if (code !== 0) {
+        resolve({ json: null, error: `exit code ${code}`, durationMs });
+        return;
       }
-      // REM phase doesn't need a log
-    }
-
-    const graph = openGraph(opts.db);
-
-    if ((phase === 'nrem' || phase === 'both') && logPath) {
-      console.log('\n🧠 NREM Phase — Replay + Extract + Transfer');
-      console.log(`  Source: ${logPath}`);
-
-      const nrem = await nremReplay(graph, logPath, {
-        agentName: opts.agent,
-        sinceDate: opts.since,
-      });
-
-      console.log(`  Entries processed: ${nrem.entriesProcessed}`);
-      console.log(`  Entities extracted: ${nrem.entitiesExtracted}`);
-      console.log(`  Nodes added: ${nrem.nodesAdded}`);
-      console.log(`  Nodes reinforced: ${nrem.nodesReinforced}`);
-      console.log(`  Edges added: ${nrem.edgesAdded}`);
-
-      if (nrem.entriesByType && Object.keys(nrem.entriesByType).length) {
-        console.log(`  Entry types: ${JSON.stringify(nrem.entriesByType)}`);
+      // Parse JSON from markdown code block
+      const fenceMatch = /```(?:json)?\s*([\s\S]*?)```/.exec(stdout);
+      if (fenceMatch) {
+        resolve({ json: fenceMatch[1].trim(), durationMs });
+        return;
       }
+      // Try raw JSON object
+      const rawMatch = /\{[\s\S]*\}/.exec(stdout);
+      if (rawMatch) {
+        resolve({ json: rawMatch[0], durationMs });
+        return;
+      }
+      resolve({ json: null, error: 'no JSON in output', durationMs });
+    });
 
-      if (nrem.highSalienceEntries?.length) {
-        console.log('\n  🔥 High-salience entries:');
-        for (const entry of nrem.highSalienceEntries.slice(0, 10)) {
-          console.log(`    ${entry}`);
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      resolve({ json: null, error: err.message, durationMs: Date.now() - start });
+    });
+  });
+}
+
+async function consolidateAgent(
+  agentName: string,
+  graphDbPath: string | undefined,
+  parallel: number,
+): Promise<{ entities: number; relationships: number; errors: number }> {
+  const result = prepareConsolidation(agentName, { dbPath: graphDbPath });
+  if (result.totalEntries === 0) {
+    console.log(chalk.dim(`  ${agentName}: no new entries (watermark: ${result.watermark || 'none'})`));
+    return { entities: 0, relationships: 0, errors: 0 };
+  }
+
+  console.log(
+    `  🧠 Consolidating ${chalk.bold(agentName)} (${result.chunks.length} chunks, ${result.totalEntries} entries)...`,
+  );
+
+  const graph = openGraph(graphDbPath);
+  let totalEntities = 0;
+  let totalRelationships = 0;
+  let totalErrors = 0;
+  let latestTs = result.watermark || '';
+
+  try {
+    for (let i = 0; i < result.chunks.length; i += parallel) {
+      const batch = result.chunks.slice(i, i + parallel);
+      const promises = batch.map((chunk, j) =>
+        processChunk(chunk.text, result.extractionPrompt, i + j),
+      );
+      const results = await Promise.all(promises);
+
+      for (let j = 0; j < results.length; j++) {
+        const r = results[j];
+        const chunkIdx = i + j + 1;
+        if (r.json) {
+          try {
+            const ingestResult = ingestExtractions(graph, [r.json], agentName);
+            totalEntities += ingestResult.nodesAdded + ingestResult.nodesReinforced;
+            totalRelationships += ingestResult.edgesAdded;
+            if (ingestResult.errors.length > 0) {
+              totalErrors += ingestResult.errors.length;
+            }
+            console.log(
+              chalk.dim(
+                `     Chunk ${chunkIdx}/${result.chunks.length} → ${ingestResult.nodesAdded}+${ingestResult.nodesReinforced} entities, ${ingestResult.edgesAdded} relationships (${(r.durationMs / 1000).toFixed(0)}s)`,
+              ),
+            );
+          } catch {
+            totalErrors++;
+            console.log(chalk.yellow(`     Chunk ${chunkIdx}/${result.chunks.length} → parse error, skipping`));
+          }
+        } else {
+          totalErrors++;
+          console.log(
+            chalk.yellow(`     Chunk ${chunkIdx}/${result.chunks.length} → ${r.error}, will retry next run`),
+          );
         }
       }
     }
 
-    if (phase === 'rem' || phase === 'both') {
-      console.log('\n💤 REM Phase — Decay + Prune + Refine');
-      const rem = remRefine(graph, { decayRate: parseFloat(opts.decayRate) });
-      console.log(`  Nodes decayed: ${rem.nodesDecayed}`);
-      console.log(`  Nodes pruned: ${rem.nodesPruned}`);
-      console.log(`  Edges pruned: ${rem.edgesPruned}`);
-      console.log(`  Associations created: ${rem.associationsCreated}`);
+    // Find latest timestamp from the chunks
+    const allEntries = result.chunks.reduce((sum, c) => sum + c.entryCount, 0);
+    // Use current time as watermark since we processed everything prepareConsolidation returned
+    latestTs = new Date().toISOString();
+    setWatermark(graph, agentName, latestTs, allEntries);
+
+    console.log(
+      `  ✅ ${agentName}: ${totalEntities} entities, ${totalRelationships} relationships added. Watermark: ${latestTs.slice(0, 19)}Z`,
+    );
+  } finally {
+    graph.close();
+  }
+
+  return { entities: totalEntities, relationships: totalRelationships, errors: totalErrors };
+}
+
+program
+  .command('consolidate')
+  .description('Run LLM-driven memory consolidation with parallel subprocess extraction')
+  .option('-a, --agent <name>', 'Consolidate a specific agent')
+  .option('--all', 'Consolidate all agents with logs')
+  .option('--status', 'Show consolidation status per agent')
+  .option('--parallel <n>', 'Max parallel extractions', '2')
+  .option('--decay-rate <rate>', 'Decay rate for REM phase', '0.05')
+  .option('--embed', 'Run embedding after consolidation')
+  .option('--db <path>', 'Path to graph.db')
+  .action(async (opts: {
+    agent?: string;
+    all?: boolean;
+    status?: boolean;
+    parallel: string;
+    decayRate: string;
+    embed?: boolean;
+    db?: string;
+  }) => {
+    const parallel = Math.max(1, parseInt(opts.parallel) || 2);
+    const graphDbPath = opts.db;
+
+    // --status: show watermark + pending entries per agent
+    if (opts.status) {
+      console.log(chalk.cyan.bold('\n📋 Consolidation Status\n'));
+      const agents = discoverAgents();
+      if (agents.length === 0) {
+        console.log(chalk.dim('  No agents with logs found.'));
+        process.exit(0);
+      }
+      const graph = openGraph(graphDbPath);
+      try {
+        for (const agent of agents) {
+          const wm = getWatermark(graph, agent);
+          const result = prepareConsolidation(agent, { dbPath: graphDbPath });
+          const wmDisplay = wm ? wm.slice(0, 19) + 'Z' : 'never';
+          if (result.totalEntries > 0) {
+            console.log(`  ${chalk.yellow('●')} ${agent}: ${result.totalEntries} pending entries (${result.chunks.length} chunks) — watermark: ${wmDisplay}`);
+          } else {
+            console.log(`  ${chalk.green('●')} ${agent}: up to date — watermark: ${wmDisplay}`);
+          }
+        }
+      } finally {
+        graph.close();
+      }
+      process.exit(0);
     }
 
-    await runEmbedIfRequested(graph, opts.embed);
+    // Determine which agents to process
+    let agents: string[];
+    if (opts.all) {
+      agents = discoverAgents();
+      if (agents.length === 0) {
+        console.log(chalk.dim('No agents with logs found.'));
+        process.exit(0);
+      }
+    } else if (opts.agent) {
+      agents = [opts.agent];
+    } else {
+      console.log(chalk.yellow('Specify --agent <name> or --all'));
+      process.exit(1);
+      return; // unreachable, but helps TS
+    }
 
-    const graphStats = graph.stats();
+    console.log(chalk.cyan.bold(`\n🧠 NREM Consolidation — ${agents.length} agent(s), parallel=${parallel}\n`));
+
+    let grandEntities = 0;
+    let grandRelationships = 0;
+    let grandErrors = 0;
+    for (const agent of agents) {
+      const r = await consolidateAgent(agent, graphDbPath, parallel);
+      grandEntities += r.entities;
+      grandRelationships += r.relationships;
+      grandErrors += r.errors;
+    }
+
+    // REM phase
+    console.log('\n💤 REM Phase — Decay + Prune');
+    const graph = openGraph(graphDbPath);
+    try {
+      const rem = remRefine(graph, { decayRate: parseFloat(opts.decayRate) });
+      console.log(chalk.dim(`  Decayed: ${rem.nodesDecayed} nodes`));
+      if (rem.nodesPruned > 0 || rem.edgesPruned > 0) {
+        console.log(chalk.dim(`  Pruned: ${rem.nodesPruned} nodes, ${rem.edgesPruned} edges`));
+      }
+
+      await runEmbedIfRequested(graph, opts.embed);
+
+      const graphStats = graph.stats();
+      console.log(
+        `\n📊 Graph: ${graphStats.nodeCount} nodes, ${graphStats.edgeCount} edges, avg salience ${graphStats.avgSalience.toFixed(3)}`,
+      );
+    } finally {
+      graph.close();
+    }
+
+    if (grandErrors > 0) {
+      console.log(chalk.yellow(`\n⚠️  ${grandErrors} chunk(s) failed — will retry on next run`));
+    }
     console.log(
-      `\n📊 Graph state: ${graphStats.nodeCount} nodes, ${graphStats.edgeCount} edges, avg salience ${graphStats.avgSalience.toFixed(3)}`,
+      chalk.green(`\n✅ Consolidation complete: ${grandEntities} entities, ${grandRelationships} relationships\n`),
     );
-
-    graph.close();
     process.exit(0);
   });
 
+// ── Sleep ───────────────────────────────────────────────────────────────────
+
 program
   .command('sleep')
-  .description('Run graph maintenance — decay, prune, integrity checks')
+  .description('Run full maintenance — REM decay/prune and integrity checks')
   .option('--db <path>', 'Path to graph.db')
-  .action(async (opts) => {
+  .option('--embed', 'Run embedding after maintenance')
+  .action(async (opts: { db?: string; embed?: boolean }) => {
     console.log('\n🌙 Running graph maintenance...\n');
-    console.log(chalk.dim('Entity extraction uses the myelin_consolidate tool in an agent session.'));
-    console.log(chalk.dim('This command runs REM (decay/prune) and integrity checks only.'));
-    console.log('');
+    console.log(chalk.dim('  Entity extraction: use `myelin consolidate --all` for LLM-driven NREM.'));
+    console.log(chalk.dim('  This command runs REM (decay/prune) only.\n'));
 
     const graph = openGraph(opts.db);
-
-    // NREM + REM for each agent
-    // REM: decay, prune, integrity checks
-    console.log('  🧹 Running REM refinement...');
     try {
-      const rem = remRefine(graph);
-      console.log(chalk.dim(`     Decayed: ${rem.nodesDecayed} nodes`));
-      if (rem.nodesPruned > 0 || rem.edgesPruned > 0) {
-        console.log(chalk.dim(`     Pruned: ${rem.nodesPruned} nodes, ${rem.edgesPruned} edges`));
+      console.log('  🧹 Running REM refinement...');
+      try {
+        const rem = remRefine(graph);
+        console.log(chalk.dim(`     Decayed: ${rem.nodesDecayed} nodes`));
+        if (rem.nodesPruned > 0 || rem.edgesPruned > 0) {
+          console.log(chalk.dim(`     Pruned: ${rem.nodesPruned} nodes, ${rem.edgesPruned} edges`));
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(chalk.yellow(`     ⚠️ REM failed: ${msg}`));
       }
-    } catch (err: any) {
-      console.log(chalk.yellow(`     ⚠️ REM failed: ${err.message}`));
+
+      await runEmbedIfRequested(graph, opts.embed);
+
+      const graphStats = graph.stats();
+      console.log(`\n✅ Maintenance complete`);
+      console.log(
+        `📊 Graph: ${graphStats.nodeCount} nodes, ${graphStats.edgeCount} edges, avg salience ${graphStats.avgSalience.toFixed(3)}`,
+      );
+    } finally {
+      graph.close();
     }
-
-    // Summary
-    const graphStats = graph.stats();
-    console.log(
-      `\n✅ Maintenance complete`,
-    );
-    console.log(
-      `📊 Graph: ${graphStats.nodeCount} nodes, ${graphStats.edgeCount} edges, avg salience ${graphStats.avgSalience.toFixed(3)}`,
-    );
-
-    graph.close();
     process.exit(0);
   });
 
