@@ -684,9 +684,15 @@ export function parseLlmExtraction(
       ? (rawType as NodeType)
       : NodeType.Concept;
 
+    // Normalize ID: always run through nameToId for consistent kebab-case
+    const rawId = (e.id as string) ?? "";
+    const normalizedId = rawId ? nameToId(rawId) : nameToId((e.name as string) ?? "unknown");
+
+    if (!normalizedId) continue; // skip empty IDs
+
     entities.push(
       buildNode(
-        (e.id as string) ?? nameToId((e.name as string) ?? "unknown"),
+        normalizedId,
         nodeType,
         (e.name as string) ?? "Unknown",
         (e.description as string) ?? "",
@@ -704,10 +710,15 @@ export function parseLlmExtraction(
       ? (rawRel as RelationshipType)
       : RelationshipType.RelatesTo;
 
+    // Normalize source/target IDs to match entity ID normalization
+    const sourceId = nameToId((r.source as string) ?? "");
+    const targetId = nameToId((r.target as string) ?? "");
+    if (!sourceId || !targetId) continue; // skip edges with empty endpoints
+
     relationships.push(
       buildEdge(
-        (r.source as string) ?? "",
-        (r.target as string) ?? "",
+        sourceId,
+        targetId,
         relType,
         (r.description as string) ?? "",
         sourceAgent,

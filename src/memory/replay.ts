@@ -769,6 +769,18 @@ export function remRefine(
   const nodesPruned = graph.prune(pruneThreshold, pruneMinAgeDays);
   const edgesPruned = pruneOrphanEdges(graph);
 
+  // Prune orphan knowledge nodes (no edges, low salience)
+  // These are entities the LLM extracted but couldn't connect to anything meaningful
+  const orphansPruned = graph.db
+    .prepare(
+      `DELETE FROM nodes WHERE
+       category IN ('knowledge', 'nrem')
+       AND salience < 0.5
+       AND id NOT IN (SELECT source_id FROM edges)
+       AND id NOT IN (SELECT target_id FROM edges)`,
+    )
+    .run();
+
   // Clean orphan embeddings (table may not exist)
   try {
     graph.db
@@ -778,9 +790,9 @@ export function remRefine(
 
   return {
     nodesDecayed,
-    nodesPruned,
+    nodesPruned: nodesPruned + orphansPruned.changes,
     edgesPruned,
-    associationsCreated: 0, // handled in NREM via resolveCodeReferences
+    associationsCreated: 0,
     abstractionsMade: 0,
   };
 }

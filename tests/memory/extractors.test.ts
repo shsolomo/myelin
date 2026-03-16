@@ -212,11 +212,21 @@ describe('parseLlmExtraction', () => {
   });
 
   it('handles missing fields gracefully', () => {
+    // Entity with no fields gets default name "Unknown" and normalized id "unknown"
     const json = JSON.stringify({ entities: [{}], relationships: [{}] });
     const result = parseLlmExtraction(json);
     expect(result.entities).toHaveLength(1);
+    expect(result.entities[0].id).toBe('unknown');
     expect(result.entities[0].name).toBe('Unknown');
-    expect(result.relationships).toHaveLength(1);
+    expect(result.relationships).toHaveLength(0); // filtered: no source/target
+  });
+
+  it('entities with a name but no id get normalized id', () => {
+    const json = JSON.stringify({ entities: [{ name: 'Test Entity' }], relationships: [] });
+    const result = parseLlmExtraction(json);
+    expect(result.entities).toHaveLength(1);
+    expect(result.entities[0].id).toBe('test-entity');
+    expect(result.entities[0].name).toBe('Test Entity');
   });
 });
 

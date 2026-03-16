@@ -179,13 +179,27 @@ Return JSON with this structure:
   ]
 }
 
+RULES:
+1. PERSON type is ONLY for real human names (first + last name like "Jeff West", "Ian Philpot"). Never classify project names, concepts, agent names, events, meetings, or abstract nouns as person.
+2. Use SPECIFIC relationship types — avoid "relates_to" when a more precise type fits:
+   - depends_on: X requires Y to work, X is blocked by Y
+   - belongs_to: X is part of Y, X is a component of Y
+   - authored_by: X was created/built/designed by person Y
+   - learned_from: X was discovered/informed by experience Y
+   - evolved_into: X became Y, X was replaced by Y
+   - mentioned_in: X was discussed at meeting Y
+   - supersedes: X replaces/obsoletes Y
+   - blocked_by: X is blocked/prevented by Y
+   - conflicts_with: X contradicts/is incompatible with Y
+3. Every entity MUST have at least one relationship. If you can't connect it, it's probably not meaningful enough to extract.
+4. Use consistent IDs: lowercase kebab-case, descriptive, max 40 chars. For the same concept across chunks, use the same ID (e.g. always "myelin-v090" not sometimes "v090-release").
+
 SALIENCE GUIDE:
 - 1.0: Critical decision, blocking bug, architectural change
 - 0.7-0.9: Important pattern, key person interaction, initiative progress
 - 0.4-0.6: Standard meeting outcome, routine update
 - 0.1-0.3: Minor mention, context detail
 
-Only extract entities that are MEANINGFUL — skip filler, transient details, and things already fully captured elsewhere.
-Link new entities to existing ones when there's a real relationship.
+Only extract entities that are MEANINGFUL — skip filler, transient details, and routine status updates.
 `;
 }
