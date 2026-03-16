@@ -37,23 +37,24 @@ myelin doctor       # check everything is healthy
 
 ## Version History
 
-### v0.10.0 — Resumable Parallel Consolidation
+### v0.10.0 — Resumable Parallel Sleep
 
 **Upgrade action:** Run `myelin update` (or `git pull && npm install --legacy-peer-deps && npm run build && myelin setup-extension`).
 
 **What changed:**
 
-- **`myelin consolidate` CLI command** (#65) — Parallel subprocess-based LLM extraction. Spawns `copilot -p` subprocesses to extract entities and relationships from agent logs. Supports `--agent`, `--all`, `--parallel N`, and `--status` flags.
-- **Watermark-based resumable consolidation** (#65) — Tracks `last_consolidated_ts` per agent in the graph. If a session dies mid-batch, the next run picks up where it left off. No re-processing.
+- **`myelin sleep` is now the single memory command** (#65) — Parallel subprocess-based LLM extraction + REM maintenance in one command. Spawns `copilot -p` subprocesses to extract entities and relationships from agent logs. Supports `--agent`, `--all`, `--parallel N`, and `--status` flags.
+- **Watermark-based resumable sleep** (#65) — Tracks `last_consolidated_ts` per agent in the graph. If a session dies mid-batch, the next run picks up where it left off. No re-processing.
 - **Archive .md log support** (#65) — Reads both `log.jsonl` and `log.md` files, merges and deduplicates entries.
-- **Regex extraction removed** — `extractFromEntry()` no longer falls back to regex. Single extraction path: LLM via `myelin_consolidate` tool or `myelin consolidate` CLI.
-- **`myelin sleep` is now REM-only** (#60) — Runs decay/prune maintenance. Entity extraction uses `myelin consolidate`.
+- **Regex extraction removed** — Single extraction path: LLM via `myelin_sleep` extension tool or `myelin sleep` CLI.
+- **Extension tool renamed** — `myelin_consolidate` → `myelin_sleep` with the same three modes: `prepare`, `ingest`, `complete`.
 - **Extraction quality improvements** — Stricter person typing (humans only), specific relationship type guidance, ID normalization for consistent dedup, orphan knowledge node pruning in REM.
 - **Install & Upgrade UAT workflows** — CI tests fresh installs and upgrade paths across 3 OS × 2 Node versions.
 
 **Breaking changes:**
-- `myelin sleep` no longer extracts entities — use `myelin consolidate --all` for NREM extraction
-- `myelin consolidate` requires `copilot` CLI to be installed (used as the LLM subprocess)
+- `myelin consolidate` renamed to `myelin sleep` (old name kept as hidden alias)
+- `myelin_consolidate` extension tool renamed to `myelin_sleep`
+- `myelin sleep` requires `copilot` CLI to be installed (used as the LLM subprocess)
 
 ---
 
