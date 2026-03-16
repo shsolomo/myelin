@@ -36,6 +36,26 @@ myelin doctor       # check everything is healthy
 ---
 
 ## Version History
+
+### v0.10.0 — Resumable Parallel Consolidation
+
+**Upgrade action:** Run `myelin update` (or `git pull && npm install --legacy-peer-deps && npm run build && myelin setup-extension`).
+
+**What changed:**
+
+- **`myelin consolidate` CLI command** (#65) — Parallel subprocess-based LLM extraction. Spawns `copilot -p` subprocesses to extract entities and relationships from agent logs. Supports `--agent`, `--all`, `--parallel N`, and `--status` flags.
+- **Watermark-based resumable consolidation** (#65) — Tracks `last_consolidated_ts` per agent in the graph. If a session dies mid-batch, the next run picks up where it left off. No re-processing.
+- **Archive .md log support** (#65) — Reads both `log.jsonl` and `log.md` files, merges and deduplicates entries.
+- **Regex extraction removed** — `extractFromEntry()` no longer falls back to regex. Single extraction path: LLM via `myelin_consolidate` tool or `myelin consolidate` CLI.
+- **`myelin sleep` is now REM-only** (#60) — Runs decay/prune maintenance. Entity extraction uses `myelin consolidate`.
+- **Extraction quality improvements** — Stricter person typing (humans only), specific relationship type guidance, ID normalization for consistent dedup, orphan knowledge node pruning in REM.
+- **Install & Upgrade UAT workflows** — CI tests fresh installs and upgrade paths across 3 OS × 2 Node versions.
+
+**Breaking changes:**
+- `myelin sleep` no longer extracts entities — use `myelin consolidate --all` for NREM extraction
+- `myelin consolidate` requires `copilot` CLI to be installed (used as the LLM subprocess)
+
+---
 
 ### v0.9.0 — Zero ML Dependencies
 
