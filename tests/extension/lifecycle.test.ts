@@ -4,15 +4,24 @@
  * onErrorOccurred, and onPostToolUse hooks.
  *
  * Tests import source modules directly (NOT the bundled extension).
+ * Uses mocked homedir to avoid polluting real agent logs.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { KnowledgeGraph } from '../../src/memory/graph.js';
-import { getBootContext, resolveAgent, appendStructuredLog } from '../../src/memory/agents.js';
-import { readLogEntries } from '../../src/memory/structured-log.js';
+
+// Redirect agent log writes to a temp directory
+const TEST_LOG_DIR = join(tmpdir(), `myelin-test-lifecycle-${Date.now()}`);
+
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal() as any;
+  return {
+    ...actual,
+    homedir: () => TEST_LOG_DIR,
+  };
+});
 
 vi.mock('../../src/memory/embeddings.js', () => ({
   getEmbedding: vi.fn().mockResolvedValue([]),
@@ -22,6 +31,22 @@ vi.mock('../../src/memory/embeddings.js', () => ({
   isAvailable: vi.fn().mockResolvedValue(false),
   resetModel: vi.fn(),
 }));
+
+// Dynamic imports — must come after TEST_LOG_DIR is initialized
+// so structured-log.ts sees the mocked homedir during module load
+const { KnowledgeGraph } = await import('../../src/memory/graph.js');
+const { getBootContext, resolveAgent, appendStructuredLog } = await import('../../src/memory/agents.js');
+const { readLogEntries } = await import('../../src/memory/structured-log.js');
+
+beforeEach(() => {
+  mkdirSync(TEST_LOG_DIR, { recursive: true });
+});
+
+afterEach(() => {
+  if (existsSync(TEST_LOG_DIR)) {
+    try { rmSync(TEST_LOG_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+});
 
 // ─── Stopwords & extractKeywords ─────────────────────────────────
 
@@ -414,11 +439,6 @@ describe('graph search patterns — FTS5 and sensitivity filtering', () => {
 describe('onSessionEnd — session termination logging', () => {
   const testAgent = `test-lifecycle-${Date.now()}`;
 
-  afterEach(() => {
-    try {
-      rmSync(join(tmpdir(), 'myelin-test-ext-lifecycle'), { recursive: true, force: true });
-    } catch { /* ignore */ }
-  });
 
   it('logs handover event with session agent', () => {
     const sessionAgent = 'cajal';

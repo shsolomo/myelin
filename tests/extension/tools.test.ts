@@ -4,14 +4,24 @@
  * and myelin_stats tool handlers perform.
  *
  * Tests import source modules directly (NOT the bundled extension).
+ * Uses mocked homedir to avoid polluting real agent logs.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { KnowledgeGraph } from '../../src/memory/graph.js';
-import { getBootContext, appendStructuredLog } from '../../src/memory/agents.js';
+
+// Redirect agent log writes to a temp directory
+const TEST_LOG_DIR = join(tmpdir(), `myelin-test-tools-${Date.now()}`);
+
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal() as any;
+  return {
+    ...actual,
+    homedir: () => TEST_LOG_DIR,
+  };
+});
 
 vi.mock('../../src/memory/embeddings.js', () => ({
   getEmbedding: vi.fn().mockResolvedValue([]),
@@ -21,6 +31,21 @@ vi.mock('../../src/memory/embeddings.js', () => ({
   isAvailable: vi.fn().mockResolvedValue(false),
   resetModel: vi.fn(),
 }));
+
+// Dynamic imports — must come after TEST_LOG_DIR is initialized
+// so structured-log.ts sees the mocked homedir during module load
+const { KnowledgeGraph } = await import('../../src/memory/graph.js');
+const { getBootContext, appendStructuredLog } = await import('../../src/memory/agents.js');
+
+beforeEach(() => {
+  mkdirSync(TEST_LOG_DIR, { recursive: true });
+});
+
+afterEach(() => {
+  if (existsSync(TEST_LOG_DIR)) {
+    try { rmSync(TEST_LOG_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+});
 
 // ─── myelin_query ────────────────────────────────────────────────
 
@@ -226,18 +251,7 @@ describe('myelin_boot — boot context generation', () => {
 // ─── myelin_log ──────────────────────────────────────────────────
 
 describe('myelin_log — structured log writing', () => {
-  let logDir: string;
   const testAgent = `test-agent-${Date.now()}`;
-
-  beforeEach(() => {
-    logDir = join(tmpdir(), 'myelin-test-ext-tools', 'agents', testAgent);
-  });
-
-  afterEach(() => {
-    try {
-      rmSync(join(tmpdir(), 'myelin-test-ext-tools'), { recursive: true, force: true });
-    } catch { /* ignore */ }
-  });
 
   it('appendStructuredLog writes JSONL entry and returns file path', () => {
     const logPath = appendStructuredLog(testAgent, 'action', 'Implemented feature X', {
