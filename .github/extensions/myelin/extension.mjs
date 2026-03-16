@@ -50,7 +50,7 @@ var require_better_sqlite3 = __commonJS({
 // src/extension/extension.in-process.ts
 var import_copilot_sdk = __toESM(require_copilot_sdk(), 1);
 var import_extension = __toESM(require_extension(), 1);
-import { homedir as homedir3 } from "node:os";
+import { homedir as homedir4 } from "node:os";
 import { join as join4 } from "node:path";
 import { existsSync as existsSync3 } from "node:fs";
 
@@ -132,6 +132,13 @@ CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id);
 CREATE INDEX IF NOT EXISTS idx_edges_relationship ON edges(relationship);
 CREATE INDEX IF NOT EXISTS idx_node_tags_tag ON node_tags(tag);
 CREATE INDEX IF NOT EXISTS idx_nodes_pinned ON nodes(pinned) WHERE pinned = 1;
+
+CREATE TABLE IF NOT EXISTS consolidation_state (
+    agent TEXT PRIMARY KEY,
+    last_consolidated_ts TEXT,
+    last_run_ts TEXT,
+    entries_processed INTEGER DEFAULT 0
+);
 `;
 var CODE_COLUMNS = [
   ["category", "TEXT DEFAULT 'knowledge'"],
@@ -886,11 +893,26 @@ import { homedir as homedir2 } from "node:os";
 import { join as join2 } from "node:path";
 
 // src/memory/structured-log.ts
-import { readFileSync, appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync as readFileSync2, appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 // src/memory/log-parser.ts
+import { readFileSync } from "node:fs";
+var DATE_HEADING = /^## (\d{4}-\d{2}-\d{2})/;
+var SECTION_HEADING = /^### (.+)/;
+var CONSOLIDATED_NOTE = /^_Consolidated .+\._$/;
+var HANDOVER_HEADING = /^### Session Handover/;
+var DECISION_MARKERS = /\b(decided|agreed|chose|going with|settled on|key decision|design decision)\b/i;
+var ACTION_MARKERS = /\b(created|updated|built|implemented|fixed|deployed|published|posted|sent)\b/i;
+function classifyEntry(heading, content) {
+  const combined = `${heading}
+${content}`;
+  if (HANDOVER_HEADING.test(`### ${heading}`)) return "handover";
+  if (DECISION_MARKERS.test(combined)) return "decision";
+  if (ACTION_MARKERS.test(combined)) return "action";
+  return "observation";
+}
 function makeEntry(date, heading, content, entryType, metadata = {}) {
   return {
     date,
@@ -903,6 +925,56 @@ function makeEntry(date, heading, content, entryType, metadata = {}) {
 ${this.content}` : this.content;
     }
   };
+}
+function parseLog(content) {
+  const entries = [];
+  const lines = content.split("\n");
+  let currentDate = null;
+  let currentHeading = null;
+  let currentLines = [];
+  function flush() {
+    if (currentDate && currentLines.length > 0) {
+      const text = currentLines.join("\n").trim();
+      if (text && !CONSOLIDATED_NOTE.test(text)) {
+        const entryType = classifyEntry(currentHeading ?? "", text);
+        entries.push(
+          makeEntry(currentDate, currentHeading ?? "", text, entryType)
+        );
+      }
+    }
+    currentLines = [];
+  }
+  for (const line of lines) {
+    if (line.startsWith("# Log") || line.startsWith("_Append-only")) {
+      continue;
+    }
+    const dateMatch = DATE_HEADING.exec(line);
+    if (dateMatch) {
+      flush();
+      currentDate = dateMatch[1];
+      currentHeading = null;
+      continue;
+    }
+    const sectionMatch = SECTION_HEADING.exec(line);
+    if (sectionMatch) {
+      flush();
+      currentHeading = sectionMatch[1];
+      continue;
+    }
+    if (line.trim() === "---") {
+      continue;
+    }
+    currentLines.push(line);
+  }
+  flush();
+  return entries;
+}
+function parseLogFile(path) {
+  const content = readFileSync(path, "utf-8");
+  return parseLog(content);
+}
+function entriesSince(entries, sinceDate) {
+  return entries.filter((e) => e.date >= sinceDate);
 }
 
 // src/memory/structured-log.ts
@@ -928,7 +1000,7 @@ function writeLogEntry(agentName, entryType, summary, options = {}) {
 function readLogEntries(agentName, options = {}) {
   const logFile = join(AGENT_LOGS_DIR, agentName, "log.jsonl");
   if (!existsSync(logFile)) return [];
-  const raw = readFileSync(logFile, "utf-8").trim();
+  const raw = readFileSync2(logFile, "utf-8").trim();
   if (!raw) return [];
   let entries = [];
   for (const line of raw.split("\n")) {
@@ -1097,8 +1169,9 @@ async function getEmbedding(_text) {
 }
 
 // src/memory/replay.ts
-import { readFileSync as readFileSync2, existsSync as existsSync2, writeFileSync, unlinkSync, copyFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync as readFileSync3, existsSync as existsSync2, writeFileSync, unlinkSync, copyFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join as join3, basename } from "node:path";
+import { homedir as homedir3 } from "node:os";
 
 // src/memory/vocabulary.ts
 var ENTITY_PATTERNS = [
@@ -1571,30 +1644,80 @@ function backupGraph(dbPath) {
   copyFileSync(dbPath, backupPath);
   return backupPath;
 }
+function getWatermark(graph, agent) {
+  try {
+    const row = graph.db.prepare("SELECT last_consolidated_ts FROM consolidation_state WHERE agent = ?").get(agent);
+    return row?.last_consolidated_ts ?? null;
+  } catch {
+    return null;
+  }
+}
 function prepareConsolidation(agentName, options) {
   const chunkSize = options?.chunkSize ?? 8;
-  const entries = readLogEntries(agentName, {
-    sinceDate: options?.sinceDate
+  const AGENT_LOGS_DIR3 = options?.logsDir ?? join3(homedir3(), ".copilot", ".working-memory", "agents");
+  let watermark = null;
+  let effectiveSinceDate = options?.sinceDate;
+  if (!effectiveSinceDate && options?.dbPath && existsSync2(options.dbPath)) {
+    try {
+      const graph = new KnowledgeGraph(options.dbPath);
+      try {
+        watermark = getWatermark(graph, agentName);
+        if (watermark) {
+          effectiveSinceDate = watermark;
+        }
+      } finally {
+        graph.close();
+      }
+    } catch {
+    }
+  }
+  const jsonlEntries = readLogEntries(agentName, {
+    sinceDate: effectiveSinceDate
   });
-  if (entries.length === 0) {
+  const mdLogPath = join3(AGENT_LOGS_DIR3, agentName, "log.md");
+  let mdEntries = [];
+  if (existsSync2(mdLogPath)) {
+    try {
+      const allMdEntries = parseLogFile(mdLogPath);
+      if (effectiveSinceDate) {
+        mdEntries = entriesSince(allMdEntries, effectiveSinceDate);
+      } else {
+        mdEntries = allMdEntries;
+      }
+    } catch {
+    }
+  }
+  const textEntries = [];
+  for (const e of jsonlEntries) {
+    if (watermark && e.ts <= watermark) continue;
+    const parts = [`[${e.ts}] ${e.type}: ${e.summary}`];
+    if (e.detail) parts.push(e.detail);
+    if (e.tags.length > 0) parts.push(`Tags: ${e.tags.join(", ")}`);
+    textEntries.push({ sortKey: e.ts, text: parts.join("\n") });
+  }
+  for (const e of mdEntries) {
+    if (watermark && e.date <= watermark) continue;
+    const parts = [`[${e.date}] ${e.entryType}: ${e.heading}`];
+    if (e.content) parts.push(e.content);
+    textEntries.push({ sortKey: e.date, text: parts.join("\n") });
+  }
+  textEntries.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+  if (textEntries.length === 0) {
     return {
       agentName,
       totalEntries: 0,
       chunks: [],
-      extractionPrompt: ""
+      extractionPrompt: "",
+      watermark
     };
   }
-  const chunks = [];
-  for (let i = 0; i < entries.length; i += chunkSize) {
-    const batch = entries.slice(i, i + chunkSize);
-    const text = batch.map((e) => {
-      const parts = [`[${e.ts}] ${e.type}: ${e.summary}`];
-      if (e.detail) parts.push(e.detail);
-      if (e.tags.length > 0) parts.push(`Tags: ${e.tags.join(", ")}`);
-      return parts.join("\n");
-    }).join("\n\n---\n\n");
-    chunks.push({ text, entryCount: batch.length });
+  const allChunks = [];
+  for (let i = 0; i < textEntries.length; i += chunkSize) {
+    const batch = textEntries.slice(i, i + chunkSize);
+    const text = batch.map((e) => e.text).join("\n\n---\n\n");
+    allChunks.push({ text, entryCount: batch.length });
   }
+  const chunks = options?.chunkIndex !== void 0 ? allChunks.slice(options.chunkIndex, options.chunkIndex + 1) : allChunks;
   let existingEntities = [];
   if (options?.dbPath && existsSync2(options.dbPath)) {
     try {
@@ -1609,14 +1732,15 @@ function prepareConsolidation(agentName, options) {
     }
   }
   const extractionPrompt = getLlmExtractionPrompt(
-    chunks[0].text,
+    "",
     existingEntities.length > 0 ? existingEntities : void 0
   );
   return {
     agentName,
-    totalEntries: entries.length,
+    totalEntries: textEntries.length,
     chunks,
-    extractionPrompt
+    extractionPrompt,
+    watermark
   };
 }
 function ingestExtractions(graph, extractions, agentName) {
@@ -1692,7 +1816,7 @@ function pruneOrphanEdges(graph) {
 }
 
 // src/extension/extension.in-process.ts
-var WORKING_MEMORY = join4(homedir3(), ".copilot", ".working-memory");
+var WORKING_MEMORY = join4(homedir4(), ".copilot", ".working-memory");
 var DB_PATH = join4(WORKING_MEMORY, "graph.db");
 var MYELIN_VERSION = "0.9.0";
 var sessionAgent = null;

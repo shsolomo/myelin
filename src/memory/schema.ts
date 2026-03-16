@@ -84,6 +84,13 @@ CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id);
 CREATE INDEX IF NOT EXISTS idx_edges_relationship ON edges(relationship);
 CREATE INDEX IF NOT EXISTS idx_node_tags_tag ON node_tags(tag);
 CREATE INDEX IF NOT EXISTS idx_nodes_pinned ON nodes(pinned) WHERE pinned = 1;
+
+CREATE TABLE IF NOT EXISTS consolidation_state (
+    agent TEXT PRIMARY KEY,
+    last_consolidated_ts TEXT,
+    last_run_ts TEXT,
+    entries_processed INTEGER DEFAULT 0
+);
 `;
 
 // ── Code-graph extension ─────────────────────────────────────────────────────

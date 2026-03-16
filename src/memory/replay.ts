@@ -323,6 +323,7 @@ export interface ConsolidationPrepareResult {
   totalEntries: number;
   chunks: ConsolidationChunk[];
   extractionPrompt: string;
+  watermark: string | null;
 }
 
 export interface IngestResult {
@@ -332,44 +333,159 @@ export interface IngestResult {
   errors: string[];
 }
 
+// ── Watermark-based consolidation state ───────────────────────────────────
+
+/**
+ * Read the last consolidated timestamp for an agent.
+ * Returns null if the agent has never been consolidated.
+ */
+export function getWatermark(graph: KnowledgeGraph, agent: string): string | null {
+  try {
+    const row = graph.db
+      .prepare('SELECT last_consolidated_ts FROM consolidation_state WHERE agent = ?')
+      .get(agent) as { last_consolidated_ts: string } | undefined;
+    return row?.last_consolidated_ts ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Set the consolidation watermark for an agent.
+ * Upserts the timestamp and cumulative entry count.
+ */
+export function setWatermark(
+  graph: KnowledgeGraph,
+  agent: string,
+  ts: string,
+  entriesProcessed: number,
+): void {
+  graph.db
+    .prepare(
+      `INSERT INTO consolidation_state (agent, last_consolidated_ts, last_run_ts, entries_processed)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(agent) DO UPDATE SET
+         last_consolidated_ts = excluded.last_consolidated_ts,
+         last_run_ts = excluded.last_run_ts,
+         entries_processed = consolidation_state.entries_processed + excluded.entries_processed`,
+    )
+    .run(agent, ts, new Date().toISOString(), entriesProcessed);
+}
+
 /**
  * Read an agent's pending logs and return them as text chunks
  * with the extraction schema for LLM-driven consolidation.
+ *
+ * Reads both .jsonl and .md log files. Filters by watermark if no
+ * explicit sinceDate is provided and dbPath is set.
  */
 export function prepareConsolidation(
   agentName: string,
-  options?: { sinceDate?: string; chunkSize?: number; dbPath?: string },
+  options?: {
+    sinceDate?: string;
+    chunkSize?: number;
+    chunkIndex?: number;
+    dbPath?: string;
+    logsDir?: string;
+  },
 ): ConsolidationPrepareResult {
   const chunkSize = options?.chunkSize ?? 8;
+  const AGENT_LOGS_DIR = options?.logsDir ?? join(homedir(), '.copilot', '.working-memory', 'agents');
 
-  // Read the agent's structured log
-  const entries = readLogEntries(agentName, {
-    sinceDate: options?.sinceDate,
+  // Determine the effective sinceDate from watermark or explicit override
+  let watermark: string | null = null;
+  let effectiveSinceDate = options?.sinceDate;
+
+  if (!effectiveSinceDate && options?.dbPath && existsSync(options.dbPath)) {
+    try {
+      const graph = new KnowledgeGraph(options.dbPath);
+      try {
+        watermark = getWatermark(graph, agentName);
+        if (watermark) {
+          effectiveSinceDate = watermark;
+        }
+      } finally {
+        graph.close();
+      }
+    } catch {
+      // Graph not accessible — process all entries
+    }
+  }
+
+  // Read JSONL entries via structured-log
+  const jsonlEntries = readLogEntries(agentName, {
+    sinceDate: effectiveSinceDate,
   });
 
-  if (entries.length === 0) {
+  // Read .md entries via log-parser
+  const mdLogPath = join(AGENT_LOGS_DIR, agentName, 'log.md');
+  let mdEntries: LogEntry[] = [];
+  if (existsSync(mdLogPath)) {
+    try {
+      const allMdEntries = parseLogFile(mdLogPath);
+      if (effectiveSinceDate) {
+        mdEntries = entriesSince(allMdEntries, effectiveSinceDate);
+      } else {
+        mdEntries = allMdEntries;
+      }
+    } catch {
+      // .md parse failed — skip
+    }
+  }
+
+  // Convert all entries to a common text format
+  interface TextEntry {
+    sortKey: string;
+    text: string;
+  }
+
+  const textEntries: TextEntry[] = [];
+
+  for (const e of jsonlEntries) {
+    // Filter entries AT the watermark (only entries strictly after)
+    if (watermark && e.ts <= watermark) continue;
+
+    const parts = [`[${e.ts}] ${e.type}: ${e.summary}`];
+    if (e.detail) parts.push(e.detail);
+    if (e.tags.length > 0) parts.push(`Tags: ${e.tags.join(', ')}`);
+    textEntries.push({ sortKey: e.ts, text: parts.join('\n') });
+  }
+
+  for (const e of mdEntries) {
+    // Filter entries AT the watermark
+    if (watermark && e.date <= watermark) continue;
+
+    const parts = [`[${e.date}] ${e.entryType}: ${e.heading}`];
+    if (e.content) parts.push(e.content);
+    textEntries.push({ sortKey: e.date, text: parts.join('\n') });
+  }
+
+  // Sort by timestamp
+  textEntries.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
+  if (textEntries.length === 0) {
     return {
       agentName,
       totalEntries: 0,
       chunks: [],
       extractionPrompt: '',
+      watermark,
     };
   }
 
   // Chunk entries into batches
-  const chunks: ConsolidationChunk[] = [];
-  for (let i = 0; i < entries.length; i += chunkSize) {
-    const batch = entries.slice(i, i + chunkSize);
-    const text = batch
-      .map((e) => {
-        const parts = [`[${e.ts}] ${e.type}: ${e.summary}`];
-        if (e.detail) parts.push(e.detail);
-        if (e.tags.length > 0) parts.push(`Tags: ${e.tags.join(', ')}`);
-        return parts.join('\n');
-      })
-      .join('\n\n---\n\n');
-    chunks.push({ text, entryCount: batch.length });
+  const allChunks: ConsolidationChunk[] = [];
+  for (let i = 0; i < textEntries.length; i += chunkSize) {
+    const batch = textEntries.slice(i, i + chunkSize);
+    const text = batch.map((e) => e.text).join('\n\n---\n\n');
+    allChunks.push({ text, entryCount: batch.length });
   }
+
+  // If chunkIndex is specified, return only that chunk
+  const chunks =
+    options?.chunkIndex !== undefined
+      ? allChunks.slice(options.chunkIndex, options.chunkIndex + 1)
+      : allChunks;
 
   // Get existing entity names from graph for linking context
   let existingEntities: string[] = [];
@@ -387,17 +503,18 @@ export function prepareConsolidation(
     }
   }
 
-  // Generate extraction prompt using first chunk as example text
+  // Generate extraction prompt (schema only — caller combines with chunk text)
   const extractionPrompt = getLlmExtractionPrompt(
-    chunks[0].text,
+    '',
     existingEntities.length > 0 ? existingEntities : undefined,
   );
 
   return {
     agentName,
-    totalEntries: entries.length,
+    totalEntries: textEntries.length,
     chunks,
     extractionPrompt,
+    watermark,
   };
 }
 

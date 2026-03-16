@@ -1,6 +1,7 @@
 /**
- * Tests for LLM-driven consolidation tools: prepareConsolidation() and ingestExtractions().
- * Covers issue #59.
+ * Tests for LLM-driven consolidation tools: prepareConsolidation(), ingestExtractions(),
+ * getWatermark(), setWatermark().
+ * Covers issues #59 and #65.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -11,6 +12,8 @@ import { KnowledgeGraph } from '../../src/memory/graph.js';
 import {
   prepareConsolidation,
   ingestExtractions,
+  getWatermark,
+  setWatermark,
 } from '../../src/memory/replay.js';
 
 // Mock NER so extractFromEntry uses regex fallback (not needed directly, but avoids ONNX load)
@@ -303,5 +306,150 @@ describe('ingestExtractions', () => {
     // Edge should be skipped because 'missing-node' doesn't exist
     const edges = graph.getEdges('existing-node');
     expect(edges.filter(e => e.targetId === 'missing-node')).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getWatermark / setWatermark
+// ---------------------------------------------------------------------------
+
+describe('getWatermark / setWatermark', () => {
+  let graph: KnowledgeGraph;
+
+  beforeEach(() => {
+    graph = new KnowledgeGraph(':memory:');
+  });
+
+  afterEach(() => {
+    graph.close();
+  });
+
+  it('returns null for new agent', () => {
+    const wm = getWatermark(graph, 'never-consolidated');
+    expect(wm).toBeNull();
+  });
+
+  it('round-trips a watermark', () => {
+    setWatermark(graph, 'test-agent', '2026-03-15T10:00:00Z', 25);
+    const wm = getWatermark(graph, 'test-agent');
+    expect(wm).toBe('2026-03-15T10:00:00Z');
+  });
+
+  it('upserts and accumulates entries_processed', () => {
+    setWatermark(graph, 'agent-a', '2026-03-14T10:00:00Z', 10);
+    setWatermark(graph, 'agent-a', '2026-03-15T10:00:00Z', 5);
+
+    const wm = getWatermark(graph, 'agent-a');
+    expect(wm).toBe('2026-03-15T10:00:00Z');
+
+    const row = graph.db
+      .prepare('SELECT entries_processed FROM consolidation_state WHERE agent = ?')
+      .get('agent-a') as { entries_processed: number };
+    expect(row.entries_processed).toBe(15);
+  });
+
+  it('handles multiple agents independently', () => {
+    setWatermark(graph, 'donna', '2026-03-15T08:00:00Z', 50);
+    setWatermark(graph, 'hebb', '2026-03-15T09:00:00Z', 30);
+
+    expect(getWatermark(graph, 'donna')).toBe('2026-03-15T08:00:00Z');
+    expect(getWatermark(graph, 'hebb')).toBe('2026-03-15T09:00:00Z');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// prepareConsolidation — watermark and .md log support
+// ---------------------------------------------------------------------------
+
+describe('prepareConsolidation watermark support', () => {
+  it('result includes watermark field (null when no dbPath)', () => {
+    writeTestLog('wm-agent', [
+      { ts: '2026-03-15T10:00:00Z', agent: 'wm-agent', type: 'action', summary: 'Entry one', detail: '', tags: [] },
+    ]);
+
+    const result = prepareConsolidation('wm-agent');
+    expect(result).toHaveProperty('watermark');
+    expect(result.watermark).toBeNull();
+  });
+
+  it('chunkIndex returns only the specified chunk', () => {
+    const entries = Array.from({ length: 10 }, (_, i) => ({
+      ts: `2026-03-15T${String(i + 10).padStart(2, '0')}:00:00Z`,
+      agent: 'chunk-idx',
+      type: 'observation',
+      summary: `Entry ${i}`,
+      detail: '',
+      tags: [],
+    }));
+    writeTestLog('chunk-idx', entries);
+
+    const result = prepareConsolidation('chunk-idx', { chunkSize: 3, chunkIndex: 1 });
+    expect(result.totalEntries).toBe(10);
+    expect(result.chunks).toHaveLength(1);
+    expect(result.chunks[0].entryCount).toBe(3);
+    expect(result.chunks[0].text).toContain('Entry 3');
+  });
+
+  it('chunkIndex out of range returns empty chunks', () => {
+    writeTestLog('chunk-oob', [
+      { ts: '2026-03-15T10:00:00Z', agent: 'chunk-oob', type: 'action', summary: 'Only entry', detail: '', tags: [] },
+    ]);
+
+    const result = prepareConsolidation('chunk-oob', { chunkIndex: 99 });
+    expect(result.totalEntries).toBe(1);
+    expect(result.chunks).toHaveLength(0);
+  });
+});
+
+describe('prepareConsolidation .md log support', () => {
+  it('reads .md log entries', () => {
+    const logDir = join(AGENTS_DIR, 'md-agent');
+    mkdirSync(logDir, { recursive: true });
+    writeFileSync(join(logDir, 'log.md'), [
+      '## 2026-03-14',
+      '### Shipped the feature',
+      'Deployed the new API endpoint with rate limiting.',
+      '### Fixed the auth bug',
+      'Token refresh was using stale cache. Cleared and retested.',
+    ].join('\n'), 'utf-8');
+
+    const result = prepareConsolidation('md-agent', { logsDir: AGENTS_DIR });
+    expect(result.totalEntries).toBe(2);
+    expect(result.chunks[0].text).toContain('Shipped the feature');
+    expect(result.chunks[0].text).toContain('Fixed the auth bug');
+  });
+
+  it('merges .jsonl and .md entries sorted by date', () => {
+    const logDir = join(AGENTS_DIR, 'merge-agent');
+    mkdirSync(logDir, { recursive: true });
+
+    // Write JSONL entries
+    writeTestLog('merge-agent', [
+      { ts: '2026-03-15T10:00:00Z', agent: 'merge-agent', type: 'action', summary: 'JSONL entry', detail: '', tags: [] },
+    ]);
+
+    // Write .md entries (earlier date)
+    writeFileSync(join(logDir, 'log.md'), [
+      '## 2026-03-14',
+      '### Markdown entry from yesterday',
+      'This was logged in the old .md format.',
+    ].join('\n'), 'utf-8');
+
+    const result = prepareConsolidation('merge-agent', { logsDir: AGENTS_DIR });
+    expect(result.totalEntries).toBe(2);
+    // .md entry (2026-03-14) should sort before .jsonl entry (2026-03-15)
+    expect(result.chunks[0].text.indexOf('Markdown entry')).toBeLessThan(
+      result.chunks[0].text.indexOf('JSONL entry'),
+    );
+  });
+
+  it('handles missing .md log gracefully', () => {
+    writeTestLog('no-md-agent', [
+      { ts: '2026-03-15T10:00:00Z', agent: 'no-md-agent', type: 'action', summary: 'Only JSONL', detail: '', tags: [] },
+    ]);
+
+    const result = prepareConsolidation('no-md-agent', { logsDir: AGENTS_DIR });
+    expect(result.totalEntries).toBe(1);
+    expect(result.chunks[0].text).toContain('Only JSONL');
   });
 });
