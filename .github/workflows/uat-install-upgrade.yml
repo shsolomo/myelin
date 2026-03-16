@@ -87,7 +87,7 @@ jobs:
       - name: Upgrade to latest
         run: |
           cd myelin-test
-          git checkout main
+          git checkout -f main
           npm install --legacy-peer-deps
           npm run build
 
