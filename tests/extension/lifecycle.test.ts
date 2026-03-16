@@ -1,7 +1,7 @@
 /**
  * Extension lifecycle hook tests — exercises the logic patterns
  * used by onSessionStart, onSessionEnd,
- * and onErrorOccurred hooks.
+ * onErrorOccurred, and onPostToolUse hooks.
  *
  * Tests import source modules directly (NOT the bundled extension).
  */
@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { KnowledgeGraph } from '../../src/memory/graph.js';
 import { getBootContext, resolveAgent, appendStructuredLog } from '../../src/memory/agents.js';
+import { readLogEntries } from '../../src/memory/structured-log.js';
 
 vi.mock('../../src/memory/embeddings.js', () => ({
   getEmbedding: vi.fn().mockResolvedValue([]),
@@ -535,5 +536,276 @@ describe('onErrorOccurred — error handling and retry logic', () => {
     }
 
     expect(result).toBeUndefined();
+  });
+});
+
+// ─── onPostToolUse logic ─────────────────────────────────────────
+
+describe('onPostToolUse — auto-log task completion', () => {
+  const testAgent = `test-posttool-${Date.now()}`;
+
+  /**
+   * Replicates the onPostToolUse hook logic from extension.in-process.ts.
+   * Returns { additionalContext } when guidance is needed, or void.
+   */
+  function simulateOnPostToolUse(
+    input: { toolName?: string; toolArgs?: { summary?: string } },
+    state: { sessionAgent: string | null; taskCompleteLogged: boolean },
+  ): { additionalContext: string } | undefined {
+    if (input.toolName === 'task_complete') {
+      const summary = input.toolArgs?.summary;
+      const agent = state.sessionAgent || resolveAgent() || 'default';
+      if (summary) {
+        try {
+          appendStructuredLog(agent, 'action', summary, {
+            tags: ['auto-task-complete'],
+          });
+          state.taskCompleteLogged = true;
+        } catch {
+          // Non-fatal
+        }
+      }
+      if (!summary) {
+        return {
+          additionalContext: 'You completed a task without a summary. Consider calling myelin_log to record what was accomplished.',
+        };
+      }
+    }
+    return undefined;
+  }
+
+  it('logs action with auto-task-complete tag when summary provided', () => {
+    const state = { sessionAgent: testAgent, taskCompleteLogged: false };
+    const input = {
+      toolName: 'task_complete',
+      toolArgs: { summary: 'Implemented user auth module with JWT' },
+    };
+
+    const result = simulateOnPostToolUse(input, state);
+    expect(result).toBeUndefined(); // No guidance needed
+    expect(state.taskCompleteLogged).toBe(true);
+
+    // Verify the log was written with correct structure
+    const entries = readLogEntries(testAgent);
+    expect(entries.length).toBeGreaterThanOrEqual(1);
+    const lastEntry = entries[entries.length - 1];
+    expect(lastEntry.type).toBe('action');
+    expect(lastEntry.summary).toBe('Implemented user auth module with JWT');
+    expect(lastEntry.tags).toEqual(['auto-task-complete']);
+  });
+
+  it('sets taskCompleteLogged flag to true after successful log', () => {
+    const state = { sessionAgent: testAgent, taskCompleteLogged: false };
+    simulateOnPostToolUse(
+      { toolName: 'task_complete', toolArgs: { summary: 'Done with tests' } },
+      state,
+    );
+    expect(state.taskCompleteLogged).toBe(true);
+  });
+
+  it('returns guidance context when summary is missing', () => {
+    const state = { sessionAgent: testAgent, taskCompleteLogged: false };
+    const result = simulateOnPostToolUse(
+      { toolName: 'task_complete', toolArgs: {} },
+      state,
+    );
+
+    expect(result).toBeDefined();
+    expect(result!.additionalContext).toContain('without a summary');
+    expect(result!.additionalContext).toContain('myelin_log');
+  });
+
+  it('returns guidance context when toolArgs is undefined', () => {
+    const state = { sessionAgent: testAgent, taskCompleteLogged: false };
+    const result = simulateOnPostToolUse(
+      { toolName: 'task_complete' },
+      state,
+    );
+
+    expect(result).toBeDefined();
+    expect(result!.additionalContext).toContain('without a summary');
+  });
+
+  it('does not set taskCompleteLogged when summary is missing', () => {
+    const state = { sessionAgent: testAgent, taskCompleteLogged: false };
+    simulateOnPostToolUse(
+      { toolName: 'task_complete', toolArgs: {} },
+      state,
+    );
+    expect(state.taskCompleteLogged).toBe(false);
+  });
+
+  it('ignores non-task_complete tools entirely', () => {
+    const state = { sessionAgent: testAgent, taskCompleteLogged: false };
+
+    const result = simulateOnPostToolUse(
+      { toolName: 'myelin_query', toolArgs: { summary: 'search something' } },
+      state,
+    );
+
+    expect(result).toBeUndefined();
+    expect(state.taskCompleteLogged).toBe(false);
+  });
+
+  it('ignores tools with no toolName', () => {
+    const state = { sessionAgent: testAgent, taskCompleteLogged: false };
+    const result = simulateOnPostToolUse({}, state);
+
+    expect(result).toBeUndefined();
+    expect(state.taskCompleteLogged).toBe(false);
+  });
+
+  it('falls back to default agent when sessionAgent is null', () => {
+    const state = { sessionAgent: null, taskCompleteLogged: false };
+    simulateOnPostToolUse(
+      { toolName: 'task_complete', toolArgs: { summary: 'Fallback test' } },
+      state,
+    );
+
+    // Should not throw — uses resolveAgent() || 'default' fallback
+    expect(state.taskCompleteLogged).toBe(true);
+  });
+
+  it('writes correct log entry format', () => {
+    const agentName = `test-posttool-format-${Date.now()}`;
+    const state = { sessionAgent: agentName, taskCompleteLogged: false };
+    simulateOnPostToolUse(
+      { toolName: 'task_complete', toolArgs: { summary: 'Shipped feature X' } },
+      state,
+    );
+
+    // Read back the log and verify structure
+    const entries = readLogEntries(agentName);
+    expect(entries.length).toBeGreaterThanOrEqual(1);
+
+    const lastEntry = entries[entries.length - 1];
+    expect(lastEntry.type).toBe('action');
+    expect(lastEntry.summary).toBe('Shipped feature X');
+    expect(lastEntry.tags).toEqual(['auto-task-complete']);
+    expect(lastEntry.agent).toBe(agentName);
+  });
+});
+
+// ─── Cross-hook state coordination ──────────────────────────────
+
+describe('cross-hook state — taskCompleteLogged prevents duplicate logging', () => {
+  /**
+   * Simulates the onSessionEnd hook logic, respecting
+   * the taskCompleteLogged flag set by onPostToolUse.
+   */
+  function simulateOnSessionEnd(
+    input: { finalMessage?: string },
+    state: { sessionAgent: string | null; taskCompleteLogged: boolean },
+  ): boolean {
+    // Returns true if logging was performed, false if skipped
+    if (state.taskCompleteLogged) return false;
+    try {
+      const agent = state.sessionAgent || resolveAgent() || 'default';
+      const summary = input.finalMessage
+        ? input.finalMessage.slice(0, 200)
+        : 'Session ended (no final message)';
+      appendStructuredLog(agent, 'handover', summary, {
+        tags: ['auto-session-end'],
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  it('onSessionEnd skips logging when taskCompleteLogged is true', () => {
+    const state = { sessionAgent: 'cajal', taskCompleteLogged: true };
+    const logged = simulateOnSessionEnd(
+      { finalMessage: 'Final message' },
+      state,
+    );
+    expect(logged).toBe(false);
+  });
+
+  it('onSessionEnd logs when taskCompleteLogged is false', () => {
+    const agentName = `test-crosshook-${Date.now()}`;
+    const state = { sessionAgent: agentName, taskCompleteLogged: false };
+    const logged = simulateOnSessionEnd(
+      { finalMessage: 'Session completed normally' },
+      state,
+    );
+    expect(logged).toBe(true);
+  });
+
+  it('full lifecycle: onPostToolUse → taskCompleteLogged → onSessionEnd skips', () => {
+    const agentName = `test-fullcycle-${Date.now()}`;
+    const state = { sessionAgent: agentName, taskCompleteLogged: false };
+
+    // Step 1: onPostToolUse fires with task_complete
+    const postToolInput = {
+      toolName: 'task_complete',
+      toolArgs: { summary: 'All tests pass, feature shipped' },
+    };
+    // Inline onPostToolUse logic
+    if (postToolInput.toolName === 'task_complete') {
+      const summary = postToolInput.toolArgs?.summary;
+      const agent = state.sessionAgent || 'default';
+      if (summary) {
+        appendStructuredLog(agent, 'action', summary, {
+          tags: ['auto-task-complete'],
+        });
+        state.taskCompleteLogged = true;
+      }
+    }
+
+    expect(state.taskCompleteLogged).toBe(true);
+
+    // Step 2: onSessionEnd fires — should skip because already logged
+    const logged = simulateOnSessionEnd(
+      { finalMessage: 'Session done' },
+      state,
+    );
+    expect(logged).toBe(false);
+
+    // Step 3: Verify only one log entry was written (the auto-task-complete, not the handover)
+    const entries = readLogEntries(agentName);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].type).toBe('action');
+    expect(entries[0].tags).toEqual(['auto-task-complete']);
+  });
+
+  it('full lifecycle: no task_complete → onSessionEnd logs handover', () => {
+    const agentName = `test-nocomplete-${Date.now()}`;
+    const state = { sessionAgent: agentName, taskCompleteLogged: false };
+
+    // No onPostToolUse for task_complete — flag stays false
+
+    // onSessionEnd fires — should log handover
+    const logged = simulateOnSessionEnd(
+      { finalMessage: 'Session ended without task_complete' },
+      state,
+    );
+    expect(logged).toBe(true);
+
+    const entries = readLogEntries(agentName);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].type).toBe('handover');
+    expect(entries[0].tags).toEqual(['auto-session-end']);
+  });
+
+  it('sessionAgent set during boot propagates to onPostToolUse and onSessionEnd', () => {
+    const agentName = `test-agent-prop-${Date.now()}`;
+    const state = { sessionAgent: null as string | null, taskCompleteLogged: false };
+
+    // Step 1: Simulate boot setting sessionAgent (like myelin_boot tool)
+    state.sessionAgent = agentName;
+
+    // Step 2: onPostToolUse uses sessionAgent
+    if (state.sessionAgent) {
+      appendStructuredLog(state.sessionAgent, 'action', 'Task done', {
+        tags: ['auto-task-complete'],
+      });
+      state.taskCompleteLogged = true;
+    }
+
+    // Verify the correct agent was used
+    const entries = readLogEntries(agentName);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].agent).toBe(agentName);
   });
 });
