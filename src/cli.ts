@@ -9,7 +9,7 @@ import chalk from 'chalk';
 import Table from 'cli-table3';
 import { homedir, tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import Database from 'better-sqlite3';
 
@@ -723,13 +723,13 @@ async function processChunk(
   index: number,
   timeoutMs = 90_000,
 ): Promise<ChunkResult> {
-  const prompt = `${promptTemplate}\n\nTEXT:\n${chunkText}\n\nReturn ONLY valid JSON.`;
+  const prompt = `${promptTemplate}\n\nTEXT:\n${chunkText}\n\nReturn ONLY valid JSON, no explanation.`;
   const start = Date.now();
 
   return new Promise((resolve) => {
     const proc = spawn('copilot', ['-p', prompt, '--disable-builtin-mcps'], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      shell: true,
+      // No shell: true — pass args directly to avoid shell quoting issues
     });
 
     let stdout = '';
