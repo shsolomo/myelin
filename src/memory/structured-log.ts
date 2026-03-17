@@ -40,6 +40,7 @@ export interface WriteLogOptions {
 
 export interface ReadLogOptions {
   sinceDate?: string;
+  sinceTimestamp?: string; // Full ISO 8601 timestamp — entries at or before this are excluded
   entryType?: string;
   limit?: number;
 }
@@ -106,6 +107,7 @@ export function readLogEntries(
     };
 
     if (options.sinceDate && entry.ts.slice(0, 10) < options.sinceDate) continue;
+    if (options.sinceTimestamp && entry.ts <= options.sinceTimestamp) continue;
     if (options.entryType && entry.type !== options.entryType) continue;
 
     entries.push(entry);

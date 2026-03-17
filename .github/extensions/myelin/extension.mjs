@@ -1017,6 +1017,7 @@ function readLogEntries(agentName, options = {}) {
       context: data.context ?? {}
     };
     if (options.sinceDate && entry.ts.slice(0, 10) < options.sinceDate) continue;
+    if (options.sinceTimestamp && entry.ts <= options.sinceTimestamp) continue;
     if (options.entryType && entry.type !== options.entryType) continue;
     entries.push(entry);
   }
@@ -1883,13 +1884,26 @@ var session = await (0, import_extension.joinSession)({
         let logCount = 0;
         if (detectedAgent) {
           try {
-            const recentLogs = readLogEntries(detectedAgent, { limit: 10 });
+            let watermark = null;
+            try {
+              const graph = new KnowledgeGraph(DB_PATH);
+              try {
+                watermark = getWatermark(graph, detectedAgent);
+              } finally {
+                graph.close();
+              }
+            } catch {
+            }
+            const recentLogs = readLogEntries(detectedAgent, {
+              ...watermark ? { sinceTimestamp: watermark } : {},
+              limit: 15
+            });
             logCount = recentLogs.length;
             if (recentLogs.length > 0) {
               const logLines = [
                 "",
                 `## Recent Activity \u2014 ${detectedAgent}`,
-                `_Last ${recentLogs.length} entries_`,
+                watermark ? `_${recentLogs.length} unconsolidated entries (since ${watermark.slice(0, 16)}Z) \u2014 older activity is in the graph_` : `_Last ${recentLogs.length} entries (no watermark \u2014 run \`myelin sleep\` to consolidate)_`,
                 "",
                 "| Time | Type | Summary |",
                 "|------|------|---------|"

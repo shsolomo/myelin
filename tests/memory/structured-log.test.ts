@@ -129,6 +129,20 @@ describe('readLogEntries', () => {
     expect(limited[0].summary).toBe('Entry 3');
     expect(limited[1].summary).toBe('Entry 4');
   });
+
+  it('filters by sinceTimestamp with full ISO precision', () => {
+    const dir = join(MOCK_AGENT_LOGS_DIR, 'ts-agent');
+    mkdirSync(dir, { recursive: true });
+    const logFile = join(dir, 'log.jsonl');
+
+    appendFileSync(logFile, JSON.stringify({ ts: '2026-03-15T10:00:00Z', agent: 'ts-agent', type: 'action', summary: 'Before watermark' }) + '\n');
+    appendFileSync(logFile, JSON.stringify({ ts: '2026-03-15T12:00:00Z', agent: 'ts-agent', type: 'action', summary: 'At watermark' }) + '\n');
+    appendFileSync(logFile, JSON.stringify({ ts: '2026-03-15T14:00:00Z', agent: 'ts-agent', type: 'finding', summary: 'After watermark' }) + '\n');
+
+    const filtered = structuredLog.readLogEntries('ts-agent', { sinceTimestamp: '2026-03-15T12:00:00Z' });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].summary).toBe('After watermark');
+  });
 });
 
 // ---------------------------------------------------------------------------

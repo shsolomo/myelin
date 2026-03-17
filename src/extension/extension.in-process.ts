@@ -18,7 +18,7 @@ import { KnowledgeGraph } from "../memory/graph.js";
 import { getBootContext, resolveAgent, appendStructuredLog } from "../memory/agents.js";
 import { readLogEntries } from "../memory/structured-log.js";
 import { getEmbedding } from "../memory/embeddings.js";
-import { prepareSleep, ingestExtractions, remRefine, runIntegrityChecks } from "../memory/replay.js";
+import { prepareSleep, ingestExtractions, remRefine, runIntegrityChecks, getWatermark } from "../memory/replay.js";
 
 const WORKING_MEMORY = join(homedir(), ".copilot", ".working-memory");
 const DB_PATH = join(WORKING_MEMORY, "graph.db");
@@ -73,17 +73,33 @@ const session = await joinSession({
           contextParts.push(briefing);
         }
 
-        // Inject recent agent activity logs (replaces manual `myelin agent log-show`)
+        // Inject unconsolidated agent activity logs (entries past the watermark)
         let logCount = 0;
         if (detectedAgent) {
           try {
-            const recentLogs = readLogEntries(detectedAgent, { limit: 10 });
+            // Read watermark to only show entries not yet in the graph
+            let watermark: string | null = null;
+            try {
+              const graph = new KnowledgeGraph(DB_PATH);
+              try {
+                watermark = getWatermark(graph, detectedAgent);
+              } finally {
+                graph.close();
+              }
+            } catch { /* graph not accessible — load recent entries */ }
+
+            const recentLogs = readLogEntries(detectedAgent, {
+              ...(watermark ? { sinceTimestamp: watermark } : {}),
+              limit: 15,
+            });
             logCount = recentLogs.length;
             if (recentLogs.length > 0) {
               const logLines: string[] = [
                 "",
                 `## Recent Activity — ${detectedAgent}`,
-                `_Last ${recentLogs.length} entries_`,
+                watermark
+                  ? `_${recentLogs.length} unconsolidated entries (since ${watermark.slice(0, 16)}Z) — older activity is in the graph_`
+                  : `_Last ${recentLogs.length} entries (no watermark — run \`myelin sleep\` to consolidate)_`,
                 "",
                 "| Time | Type | Summary |",
                 "|------|------|---------|",
