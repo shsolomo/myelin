@@ -362,7 +362,7 @@ describe('getWatermark / setWatermark', () => {
 // ---------------------------------------------------------------------------
 
 describe('prepareSleep watermark support', () => {
-  it('result includes watermark field (null when no dbPath)', () => {
+  it('result includes watermark field (null when no watermark set)', () => {
     writeTestLog('wm-agent', [
       { ts: '2026-03-15T10:00:00Z', agent: 'wm-agent', type: 'action', summary: 'Entry one', detail: '', tags: [] },
     ]);
@@ -370,6 +370,29 @@ describe('prepareSleep watermark support', () => {
     const result = prepareSleep('wm-agent');
     expect(result).toHaveProperty('watermark');
     expect(result.watermark).toBeNull();
+  });
+
+  it('filters entries past watermark when dbPath is provided', () => {
+    writeTestLog('wm-filter', [
+      { ts: '2026-03-14T10:00:00Z', agent: 'wm-filter', type: 'action', summary: 'Old entry', detail: '', tags: [] },
+      { ts: '2026-03-15T10:00:00Z', agent: 'wm-filter', type: 'action', summary: 'At watermark', detail: '', tags: [] },
+      { ts: '2026-03-16T10:00:00Z', agent: 'wm-filter', type: 'finding', summary: 'New entry', detail: '', tags: [] },
+    ]);
+
+    const dbPath = join(TEST_DIR, 'watermark-test.db');
+    const graph = new KnowledgeGraph(dbPath);
+    try {
+      setWatermark(graph, 'wm-filter', '2026-03-15T10:00:00Z', 2);
+    } finally {
+      graph.close();
+    }
+
+    const result = prepareSleep('wm-filter', { dbPath });
+    expect(result.watermark).toBe('2026-03-15T10:00:00Z');
+    expect(result.totalEntries).toBe(1);
+    expect(result.chunks[0].text).toContain('New entry');
+    expect(result.chunks[0].text).not.toContain('Old entry');
+    expect(result.chunks[0].text).not.toContain('At watermark');
   });
 
   it('chunkIndex returns only the specified chunk', () => {

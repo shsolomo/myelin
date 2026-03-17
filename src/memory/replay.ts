@@ -402,9 +402,10 @@ export function prepareSleep(
   let watermark: string | null = null;
   let effectiveSinceDate = options?.sinceDate;
 
-  if (!effectiveSinceDate && options?.dbPath && existsSync(options.dbPath)) {
+  const resolvedDbPath = options?.dbPath ?? join(homedir(), '.copilot', '.working-memory', 'graph.db');
+  if (!effectiveSinceDate && existsSync(resolvedDbPath)) {
     try {
-      const graph = new KnowledgeGraph(options.dbPath);
+      const graph = new KnowledgeGraph(resolvedDbPath);
       try {
         watermark = getWatermark(graph, agentName);
         if (watermark) {

@@ -1677,9 +1677,10 @@ function prepareSleep(agentName, options) {
   const AGENT_LOGS_DIR3 = options?.logsDir ?? join3(homedir3(), ".copilot", ".working-memory", "agents");
   let watermark = null;
   let effectiveSinceDate = options?.sinceDate;
-  if (!effectiveSinceDate && options?.dbPath && existsSync2(options.dbPath)) {
+  const resolvedDbPath = options?.dbPath ?? join3(homedir3(), ".copilot", ".working-memory", "graph.db");
+  if (!effectiveSinceDate && existsSync2(resolvedDbPath)) {
     try {
-      const graph = new KnowledgeGraph(options.dbPath);
+      const graph = new KnowledgeGraph(resolvedDbPath);
       try {
         watermark = getWatermark(graph, agentName);
         if (watermark) {
