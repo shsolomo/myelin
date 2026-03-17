@@ -333,6 +333,86 @@ describe('onSessionStart — session initialization logic', () => {
     // Should not throw — graceful fallback
     expect(typeof briefing).toBe('string');
   });
+
+  it('injects recent agent logs into boot context', () => {
+    // Write some log entries for a test agent
+    appendStructuredLog('test-agent', 'decision', 'Chose FTS5 over vector search', { tags: ['architecture'] });
+    appendStructuredLog('test-agent', 'action', 'Shipped v0.10.0 release', { tags: ['release'] });
+    appendStructuredLog('test-agent', 'finding', 'ONNX not needed after LLM pivot');
+
+    // Read them back (mirrors onSessionStart behavior)
+    const recentLogs = readLogEntries('test-agent', { limit: 10 });
+    expect(recentLogs.length).toBe(3);
+
+    // Format as the extension does
+    const logLines: string[] = [
+      '',
+      `## Recent Activity — test-agent`,
+      `_Last ${recentLogs.length} entries_`,
+      '',
+      '| Time | Type | Summary |',
+      '|------|------|---------|',
+    ];
+    for (const entry of recentLogs) {
+      const time = entry.ts.slice(0, 16).replace('T', ' ');
+      const summary = entry.summary.slice(0, 80);
+      logLines.push(`| ${time} | ${entry.type} | ${summary} |`);
+    }
+
+    const logSection = logLines.join('\n');
+    expect(logSection).toContain('## Recent Activity — test-agent');
+    expect(logSection).toContain('Chose FTS5 over vector search');
+    expect(logSection).toContain('Shipped v0.10.0 release');
+    expect(logSection).toContain('ONNX not needed after LLM pivot');
+    expect(logSection).toContain('decision');
+    expect(logSection).toContain('action');
+    expect(logSection).toContain('finding');
+  });
+
+  it('skips log injection when no agent detected', () => {
+    const detectedAgent: string | null = null;
+    let logCount = 0;
+
+    // Mirrors onSessionStart: only reads logs if agent is detected
+    if (detectedAgent) {
+      const recentLogs = readLogEntries(detectedAgent, { limit: 10 });
+      logCount = recentLogs.length;
+    }
+
+    expect(logCount).toBe(0);
+  });
+
+  it('handles agent with no log history gracefully', () => {
+    const recentLogs = readLogEntries('never-existed-agent', { limit: 10 });
+    expect(recentLogs).toEqual([]);
+  });
+
+  it('parses briefing node count from header', () => {
+    const graph = new KnowledgeGraph(dbPath);
+    graph.addNode({ name: 'Node A', type: 'concept', sourceAgent: 'test', salience: 0.8 });
+    graph.addNode({ name: 'Node B', type: 'decision', sourceAgent: 'test', salience: 0.7 });
+    graph.close();
+
+    const briefing = getBootContext('test', { dbPath });
+    const nodeMatch = briefing.match(/_(\d+) nodes/);
+    expect(nodeMatch).not.toBeNull();
+    expect(parseInt(nodeMatch![1], 10)).toBeGreaterThanOrEqual(2);
+  });
+
+  it('assembles boot summary with counts', () => {
+    // Mirrors the summary log line construction in onSessionStart
+    const detectedAgent = 'hebb';
+    const briefingNodeCount = 30;
+    const logCount = 10;
+    const graphTotal = ', graph: 17000 nodes / 15000 edges';
+
+    const parts = [`agent=${detectedAgent}`];
+    if (briefingNodeCount > 0) parts.push(`${briefingNodeCount} knowledge nodes`);
+    if (logCount > 0) parts.push(`${logCount} recent logs`);
+    const summary = `Auto-boot: ${parts.join(', ')}${graphTotal}`;
+
+    expect(summary).toBe('Auto-boot: agent=hebb, 30 knowledge nodes, 10 recent logs, graph: 17000 nodes / 15000 edges');
+  });
 });
 
 // ─── Graph search patterns (used by myelin_query) ───────────────

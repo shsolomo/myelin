@@ -1846,6 +1846,7 @@ var WORKING_MEMORY = join4(homedir4(), ".copilot", ".working-memory");
 var DB_PATH = join4(WORKING_MEMORY, "graph.db");
 var MYELIN_VERSION = "0.10.0";
 var sessionAgent = null;
+var taskCompleteLogged = false;
 function getGraph() {
   if (!existsSync3(DB_PATH)) return null;
   return new KnowledgeGraph(DB_PATH);
@@ -1855,7 +1856,7 @@ var session = await (0, import_extension.joinSession)({
   hooks: {
     onSessionStart: async (_input, _invocation) => {
       try {
-        await session.log(`Myelin v${MYELIN_VERSION} loaded \u2014 5 tools, 3 hooks`);
+        await session.log(`Myelin v${MYELIN_VERSION} loaded \u2014 5 tools, 4 hooks`);
         if (!existsSync3(DB_PATH)) {
           await session.log("No graph database found. Run `myelin init` to create one.", { level: "warning" });
           return;
@@ -1865,8 +1866,11 @@ var session = await (0, import_extension.joinSession)({
           sessionAgent = detectedAgent;
         }
         let briefing;
+        let briefingNodeCount = 0;
         try {
           briefing = getBootContext(detectedAgent, { dbPath: DB_PATH });
+          const nodeMatch = briefing.match(/_(\d+) nodes/);
+          if (nodeMatch) briefingNodeCount = parseInt(nodeMatch[1], 10);
         } catch (bootErr) {
           await session.log(`Graph boot failed: ${bootErr.message}`, { level: "warning" });
           briefing = "";
@@ -1874,6 +1878,30 @@ var session = await (0, import_extension.joinSession)({
         const contextParts = [];
         if (briefing) {
           contextParts.push(briefing);
+        }
+        let logCount = 0;
+        if (detectedAgent) {
+          try {
+            const recentLogs = readLogEntries(detectedAgent, { limit: 10 });
+            logCount = recentLogs.length;
+            if (recentLogs.length > 0) {
+              const logLines = [
+                "",
+                `## Recent Activity \u2014 ${detectedAgent}`,
+                `_Last ${recentLogs.length} entries_`,
+                "",
+                "| Time | Type | Summary |",
+                "|------|------|---------|"
+              ];
+              for (const entry of recentLogs) {
+                const time = entry.ts.slice(0, 16).replace("T", " ");
+                const summary = entry.summary.slice(0, 80);
+                logLines.push(`| ${time} | ${entry.type} | ${summary} |`);
+              }
+              contextParts.push(logLines.join("\n"));
+            }
+          } catch {
+          }
         }
         contextParts.push(
           "",
@@ -1899,6 +1927,7 @@ var session = await (0, import_extension.joinSession)({
           "- **myelin_show** \u2014 Inspect a specific node and its connections. Use after finding a node via query to explore its edges.",
           "- **myelin_stats** \u2014 Check graph health: node/edge counts, type distribution, embedding coverage."
         );
+        let graphTotal = "";
         const healthGraph = getGraph();
         if (healthGraph) {
           try {
@@ -1906,6 +1935,7 @@ var session = await (0, import_extension.joinSession)({
             if (healthStats.nodeCount === 0) {
               contextParts.push("", "\u{1F4A1} Graph is empty \u2014 run `myelin parse ./your-repo` to index code");
             } else {
+              graphTotal = `, graph: ${healthStats.nodeCount} nodes / ${healthStats.edgeCount} edges`;
               const embStats = healthGraph.embeddingStats();
               if (!embStats.vecAvailable || embStats.embeddedNodes === 0) {
                 contextParts.push("", "\u2139\uFE0F Search uses FTS5 keywords. Run `myelin embed` to add optional semantic boost.");
@@ -1916,9 +1946,11 @@ var session = await (0, import_extension.joinSession)({
             healthGraph.close();
           }
         }
-        await session.log(
-          `Auto-boot complete: agent=${detectedAgent ?? "generic"}, context injected`
-        );
+        const agentLabel = detectedAgent ?? "generic";
+        const parts = [`agent=${agentLabel}`];
+        if (briefingNodeCount > 0) parts.push(`${briefingNodeCount} knowledge nodes`);
+        if (logCount > 0) parts.push(`${logCount} recent logs`);
+        await session.log(`Auto-boot: ${parts.join(", ")}${graphTotal}`);
         return {
           additionalContext: contextParts.join("\n")
         };
@@ -1927,6 +1959,7 @@ var session = await (0, import_extension.joinSession)({
       }
     },
     onSessionEnd: async (input, _invocation) => {
+      if (taskCompleteLogged) return;
       try {
         const agent = sessionAgent || resolveAgent() || "default";
         const summary = input.finalMessage ? input.finalMessage.slice(0, 200) : "Session ended (no final message)";
@@ -1939,6 +1972,26 @@ var session = await (0, import_extension.joinSession)({
     onErrorOccurred: async (input, _invocation) => {
       if (input.recoverable && input.errorContext === "model_call") {
         return { errorHandling: "retry", retryCount: 2 };
+      }
+    },
+    onPostToolUse: async (input) => {
+      if (input.toolName === "task_complete") {
+        const summary = input.toolArgs?.summary;
+        const agent = sessionAgent || resolveAgent() || "default";
+        if (summary) {
+          try {
+            appendStructuredLog(agent, "action", summary, {
+              tags: ["auto-task-complete"]
+            });
+            taskCompleteLogged = true;
+          } catch {
+          }
+        }
+        if (!summary) {
+          return {
+            additionalContext: "You completed a task without a summary. Consider calling myelin_log to record what was accomplished."
+          };
+        }
       }
     }
   },

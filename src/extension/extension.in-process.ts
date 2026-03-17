@@ -5,8 +5,8 @@
  * It imports myelin's graph library directly — no subprocess spawning.
  *
  * Tools: myelin_query, myelin_boot, myelin_log, myelin_show, myelin_stats, myelin_sleep
- * Hooks: onSessionStart (boot prompt + tool guidance), onSessionEnd (auto-log),
- *        onErrorOccurred (resilience)
+ * Hooks: onSessionStart (boot prompt + tool guidance), onPostToolUse (auto-log task_complete),
+ *        onSessionEnd (auto-log fallback), onErrorOccurred (resilience)
  */
 
 import { homedir } from "node:os";
@@ -16,6 +16,7 @@ import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { KnowledgeGraph } from "../memory/graph.js";
 import { getBootContext, resolveAgent, appendStructuredLog } from "../memory/agents.js";
+import { readLogEntries } from "../memory/structured-log.js";
 import { getEmbedding } from "../memory/embeddings.js";
 import { prepareSleep, ingestExtractions, remRefine, runIntegrityChecks } from "../memory/replay.js";
 
@@ -26,6 +27,7 @@ const MYELIN_VERSION = __MYELIN_VERSION__;
 
 // Session-level agent identity — set when myelin_boot is called
 let sessionAgent: string | null = null;
+let taskCompleteLogged = false;
 
 /** Get a graph instance, or null if db doesn't exist. */
 function getGraph(): KnowledgeGraph | null {
@@ -40,7 +42,7 @@ const session = await joinSession({
   hooks: {
     onSessionStart: async (_input: any, _invocation: any) => {
       try {
-        await session.log(`Myelin v${MYELIN_VERSION} loaded — 5 tools, 3 hooks`);
+        await session.log(`Myelin v${MYELIN_VERSION} loaded — 5 tools, 4 hooks`);
 
         if (!existsSync(DB_PATH)) {
           await session.log("No graph database found. Run `myelin init` to create one.", { level: "warning" });
@@ -54,8 +56,12 @@ const session = await joinSession({
         }
 
         let briefing: string;
+        let briefingNodeCount = 0;
         try {
           briefing = getBootContext(detectedAgent, { dbPath: DB_PATH });
+          // Parse node count from briefing header: "_30 nodes, sorted by salience_"
+          const nodeMatch = briefing.match(/_(\d+) nodes/);
+          if (nodeMatch) briefingNodeCount = parseInt(nodeMatch[1], 10);
         } catch (bootErr: any) {
           await session.log(`Graph boot failed: ${bootErr.message}`, { level: "warning" });
           briefing = "";
@@ -65,6 +71,33 @@ const session = await joinSession({
 
         if (briefing) {
           contextParts.push(briefing);
+        }
+
+        // Inject recent agent activity logs (replaces manual `myelin agent log-show`)
+        let logCount = 0;
+        if (detectedAgent) {
+          try {
+            const recentLogs = readLogEntries(detectedAgent, { limit: 10 });
+            logCount = recentLogs.length;
+            if (recentLogs.length > 0) {
+              const logLines: string[] = [
+                "",
+                `## Recent Activity — ${detectedAgent}`,
+                `_Last ${recentLogs.length} entries_`,
+                "",
+                "| Time | Type | Summary |",
+                "|------|------|---------|",
+              ];
+              for (const entry of recentLogs) {
+                const time = entry.ts.slice(0, 16).replace("T", " ");
+                const summary = entry.summary.slice(0, 80);
+                logLines.push(`| ${time} | ${entry.type} | ${summary} |`);
+              }
+              contextParts.push(logLines.join("\n"));
+            }
+          } catch {
+            // Silent — don't break boot for log read failure
+          }
         }
 
         // Tool guidance: when to use myelin vs other tools
@@ -93,7 +126,8 @@ const session = await joinSession({
           "- **myelin_stats** — Check graph health: node/edge counts, type distribution, embedding coverage.",
         );
 
-        // Health hints
+        // Health hints + graph totals for boot summary
+        let graphTotal = "";
         const healthGraph = getGraph();
         if (healthGraph) {
           try {
@@ -101,6 +135,7 @@ const session = await joinSession({
             if (healthStats.nodeCount === 0) {
               contextParts.push("", "💡 Graph is empty — run `myelin parse ./your-repo` to index code");
             } else {
+              graphTotal = `, graph: ${healthStats.nodeCount} nodes / ${healthStats.edgeCount} edges`;
               const embStats = healthGraph.embeddingStats();
               if (!embStats.vecAvailable || embStats.embeddedNodes === 0) {
                 contextParts.push("", "ℹ️ Search uses FTS5 keywords. Run `myelin embed` to add optional semantic boost.");
@@ -113,9 +148,12 @@ const session = await joinSession({
           }
         }
 
-        await session.log(
-          `Auto-boot complete: agent=${detectedAgent ?? "generic"}, context injected`,
-        );
+        // Visible boot summary — shows what was actually loaded
+        const agentLabel = detectedAgent ?? "generic";
+        const parts = [`agent=${agentLabel}`];
+        if (briefingNodeCount > 0) parts.push(`${briefingNodeCount} knowledge nodes`);
+        if (logCount > 0) parts.push(`${logCount} recent logs`);
+        await session.log(`Auto-boot: ${parts.join(", ")}${graphTotal}`);
 
         return {
           additionalContext: contextParts.join("\n"),
@@ -126,6 +164,7 @@ const session = await joinSession({
     },
 
     onSessionEnd: async (input: any, _invocation: any) => {
+      if (taskCompleteLogged) return; // Already logged via onPostToolUse
       try {
         const agent = sessionAgent || resolveAgent() || 'default';
         const summary = input.finalMessage
@@ -142,6 +181,28 @@ const session = await joinSession({
     onErrorOccurred: async (input: any, _invocation: any) => {
       if (input.recoverable && input.errorContext === "model_call") {
         return { errorHandling: "retry" as const, retryCount: 2 };
+      }
+    },
+
+    onPostToolUse: async (input: any) => {
+      if (input.toolName === 'task_complete') {
+        const summary = input.toolArgs?.summary;
+        const agent = sessionAgent || resolveAgent() || 'default';
+        if (summary) {
+          try {
+            appendStructuredLog(agent, 'action', summary, {
+              tags: ['auto-task-complete'],
+            });
+            taskCompleteLogged = true;
+          } catch {
+            // Non-fatal — don't break session end
+          }
+        }
+        if (!summary) {
+          return {
+            additionalContext: 'You completed a task without a summary. Consider calling myelin_log to record what was accomplished.',
+          };
+        }
       }
     },
   },
