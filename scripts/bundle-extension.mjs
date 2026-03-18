@@ -17,10 +17,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf-8"));
 
-// Packages that need require() instead of import (native addons + Copilot SDK)
+// Native addons that need require() (CJS with binary bindings)
 const requirePackages = [
   "better-sqlite3",
   "sqlite-vec",
+];
+
+// Copilot SDK — must use ESM import (not require) to match how the CLI
+// provides the SDK via its module loader. Using require() gets a different
+// module instance where hooks don't wire up to the CLI's hook dispatcher.
+const esmExternals = [
   "@github/copilot-sdk",
   "@github/copilot-sdk/extension",
 ];
@@ -49,6 +55,7 @@ await build({
   platform: "node",
   format: "esm",
   outfile: join(root, "dist/extension/extension.mjs"),
+  external: esmExternals,
   plugins: [requireExternals],
   define: {
     "__MYELIN_VERSION__": JSON.stringify(pkg.version),

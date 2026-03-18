@@ -26,20 +26,6 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// require-external:@github/copilot-sdk
-var require_copilot_sdk = __commonJS({
-  "require-external:@github/copilot-sdk"(exports, module) {
-    module.exports = globalThis.require("@github/copilot-sdk");
-  }
-});
-
-// require-external:@github/copilot-sdk/extension
-var require_extension = __commonJS({
-  "require-external:@github/copilot-sdk/extension"(exports, module) {
-    module.exports = globalThis.require("@github/copilot-sdk/extension");
-  }
-});
-
 // require-external:better-sqlite3
 var require_better_sqlite3 = __commonJS({
   "require-external:better-sqlite3"(exports, module) {
@@ -48,11 +34,11 @@ var require_better_sqlite3 = __commonJS({
 });
 
 // src/extension/extension.in-process.ts
-var import_copilot_sdk = __toESM(require_copilot_sdk(), 1);
-var import_extension = __toESM(require_extension(), 1);
 import { homedir as homedir4 } from "node:os";
 import { join as join4 } from "node:path";
 import { existsSync as existsSync3, appendFileSync as appendFileSync2 } from "node:fs";
+import { approveAll } from "@github/copilot-sdk";
+import { joinSession } from "@github/copilot-sdk/extension";
 
 // src/memory/graph.ts
 var import_better_sqlite3 = __toESM(require_better_sqlite3(), 1);
@@ -1858,142 +1844,142 @@ function hookLog(msg) {
 var sessionAgent = null;
 var taskCompleteLogged = false;
 var pendingBootContext = null;
+var bootContextInjected = false;
 function getGraph() {
   if (!existsSync3(DB_PATH)) return null;
   return new KnowledgeGraph(DB_PATH);
 }
-var session = await (0, import_extension.joinSession)({
-  onPermissionRequest: import_copilot_sdk.approveAll,
+function buildBootContext() {
+  if (!existsSync3(DB_PATH)) return null;
+  const detectedAgent = sessionAgent || resolveAgent();
+  if (detectedAgent && !sessionAgent) {
+    sessionAgent = detectedAgent;
+  }
+  const contextParts = [];
+  try {
+    const briefing = getBootContext(detectedAgent, { dbPath: DB_PATH });
+    if (briefing) contextParts.push(briefing);
+  } catch (bootErr) {
+    hookLog(`buildBootContext: graph boot failed: ${bootErr.message}`);
+  }
+  if (detectedAgent) {
+    try {
+      let watermark = null;
+      try {
+        const graph = new KnowledgeGraph(DB_PATH);
+        try {
+          watermark = getWatermark(graph, detectedAgent);
+        } finally {
+          graph.close();
+        }
+      } catch {
+      }
+      const recentLogs = readLogEntries(detectedAgent, {
+        ...watermark ? { sinceTimestamp: watermark } : {},
+        limit: 15
+      });
+      if (recentLogs.length > 0) {
+        const logLines = [
+          "",
+          `## Recent Activity \u2014 ${detectedAgent}`,
+          watermark ? `_${recentLogs.length} unconsolidated entries (since ${watermark.slice(0, 16)}Z) \u2014 older activity is in the graph_` : `_Last ${recentLogs.length} entries (no watermark \u2014 run \`myelin sleep\` to consolidate)_`,
+          "",
+          "| Time | Type | Summary |",
+          "|------|------|---------|"
+        ];
+        for (const entry of recentLogs) {
+          const time = entry.ts.slice(0, 16).replace("T", " ");
+          const summary = entry.summary.slice(0, 80);
+          logLines.push(`| ${time} | ${entry.type} | ${summary} |`);
+        }
+        contextParts.push(logLines.join("\n"));
+      }
+    } catch {
+    }
+  }
+  contextParts.push(
+    "",
+    "## Myelin \u2014 When to Use These Tools",
+    "",
+    "You have a persistent knowledge graph with extracted entities, relationships, and agent history.",
+    "Use myelin tools for **conceptual, historical, and cross-domain** questions. Use grep/glob/view for **textual and file-level** searches.",
+    "",
+    "| Question type | Use | Why |",
+    "|---|---|---|",
+    "| Find a specific string in code | `grep` | Exact text match, line-level results |",
+    "| Find a file by name/pattern | `glob` | Pattern matching on file paths |",
+    "| Read a known file | `view` | Direct file access |",
+    "| How does auth work? | `myelin_query` | Conceptual \u2014 finds relationships across code, docs, and agent history |",
+    "| What did we decide about caching? | `myelin_query` | Historical \u2014 past decisions logged by agents over time |",
+    "| Who worked on the API? | `myelin_query` | Cross-domain \u2014 connects people to code to decisions |",
+    "| What's this node connected to? | `myelin_show` | Graph exploration \u2014 follow edges and relationships |",
+    "",
+    "**Tool reference:**",
+    "- **myelin_query** \u2014 Search by meaning across all knowledge (code, people, decisions, patterns). Use for 'how', 'why', 'who', and conceptual questions.",
+    "- **myelin_boot** \u2014 Load agent-specific context. Call with your agent name for a richer domain briefing.",
+    "- **myelin_log** \u2014 Record important decisions, findings, errors, and observations. These feed future sleep cycles into the graph.",
+    "- **myelin_show** \u2014 Inspect a specific node and its connections. Use after finding a node via query to explore its edges.",
+    "- **myelin_stats** \u2014 Check graph health: node/edge counts, type distribution, embedding coverage."
+  );
+  const healthGraph = getGraph();
+  if (healthGraph) {
+    try {
+      const healthStats = healthGraph.stats();
+      if (healthStats.nodeCount === 0) {
+        contextParts.push("", "\u{1F4A1} Graph is empty \u2014 run `myelin parse ./your-repo` to index code");
+      } else {
+        const embStats = healthGraph.embeddingStats();
+        if (!embStats.vecAvailable || embStats.embeddedNodes === 0) {
+          contextParts.push("", "\u2139\uFE0F Search uses FTS5 keywords. Run `myelin embed` to add optional semantic boost.");
+        }
+      }
+    } catch {
+    } finally {
+      healthGraph.close();
+    }
+  }
+  return contextParts.length > 0 ? contextParts.join("\n") : null;
+}
+var session = await joinSession({
+  onPermissionRequest: approveAll,
   hooks: {
-    // Build boot context eagerly but DON'T return additionalContext — the Copilot CLI
-    // v1.0.8 ignores the return value from onSessionStart hooks (fire-and-forget).
-    // Context is cached in pendingBootContext and injected via onUserPromptSubmitted.
+    // Build boot context eagerly and cache for onUserPromptSubmitted.
+    // CLI v1.0.8 ignores additionalContext from onSessionStart (github/copilot-cli#2142),
+    // so we cache in pendingBootContext and inject via modifiedPrompt on first prompt.
     onSessionStart: async (_input, _invocation) => {
       try {
         hookLog(`onSessionStart fired \u2014 v${MYELIN_VERSION}`);
         console.error(`[myelin] v${MYELIN_VERSION} loaded \u2014 6 tools, 4 hooks`);
-        if (!existsSync3(DB_PATH)) {
-          console.error("[myelin] No graph database found. Run `myelin init` to create one.");
-          return;
-        }
-        const detectedAgent = resolveAgent();
-        if (detectedAgent) {
-          sessionAgent = detectedAgent;
-        }
-        const contextParts = [];
-        let briefingNodeCount = 0;
-        try {
-          const briefing = getBootContext(detectedAgent, { dbPath: DB_PATH });
-          const nodeMatch = briefing.match(/_(\d+) nodes/);
-          if (nodeMatch) briefingNodeCount = parseInt(nodeMatch[1], 10);
-          if (briefing) contextParts.push(briefing);
-        } catch (bootErr) {
-          console.error(`[myelin] Graph boot failed: ${bootErr.message}`);
-        }
-        let logCount = 0;
-        if (detectedAgent) {
-          try {
-            let watermark = null;
-            try {
-              const graph = new KnowledgeGraph(DB_PATH);
-              try {
-                watermark = getWatermark(graph, detectedAgent);
-              } finally {
-                graph.close();
-              }
-            } catch {
-            }
-            const recentLogs = readLogEntries(detectedAgent, {
-              ...watermark ? { sinceTimestamp: watermark } : {},
-              limit: 15
-            });
-            logCount = recentLogs.length;
-            if (recentLogs.length > 0) {
-              const logLines = [
-                "",
-                `## Recent Activity \u2014 ${detectedAgent}`,
-                watermark ? `_${recentLogs.length} unconsolidated entries (since ${watermark.slice(0, 16)}Z) \u2014 older activity is in the graph_` : `_Last ${recentLogs.length} entries (no watermark \u2014 run \`myelin sleep\` to consolidate)_`,
-                "",
-                "| Time | Type | Summary |",
-                "|------|------|---------|"
-              ];
-              for (const entry of recentLogs) {
-                const time = entry.ts.slice(0, 16).replace("T", " ");
-                const summary = entry.summary.slice(0, 80);
-                logLines.push(`| ${time} | ${entry.type} | ${summary} |`);
-              }
-              contextParts.push(logLines.join("\n"));
-            }
-          } catch {
-          }
-        }
-        contextParts.push(
-          "",
-          "## Myelin \u2014 When to Use These Tools",
-          "",
-          "You have a persistent knowledge graph with extracted entities, relationships, and agent history.",
-          "Use myelin tools for **conceptual, historical, and cross-domain** questions. Use grep/glob/view for **textual and file-level** searches.",
-          "",
-          "| Question type | Use | Why |",
-          "|---|---|---|",
-          "| Find a specific string in code | `grep` | Exact text match, line-level results |",
-          "| Find a file by name/pattern | `glob` | Pattern matching on file paths |",
-          "| Read a known file | `view` | Direct file access |",
-          "| How does auth work? | `myelin_query` | Conceptual \u2014 finds relationships across code, docs, and agent history |",
-          "| What did we decide about caching? | `myelin_query` | Historical \u2014 past decisions logged by agents over time |",
-          "| Who worked on the API? | `myelin_query` | Cross-domain \u2014 connects people to code to decisions |",
-          "| What's this node connected to? | `myelin_show` | Graph exploration \u2014 follow edges and relationships |",
-          "",
-          "**Tool reference:**",
-          "- **myelin_query** \u2014 Search by meaning across all knowledge (code, people, decisions, patterns). Use for 'how', 'why', 'who', and conceptual questions.",
-          "- **myelin_boot** \u2014 Load agent-specific context. Call with your agent name for a richer domain briefing.",
-          "- **myelin_log** \u2014 Record important decisions, findings, errors, and observations. These feed future sleep cycles into the graph.",
-          "- **myelin_show** \u2014 Inspect a specific node and its connections. Use after finding a node via query to explore its edges.",
-          "- **myelin_stats** \u2014 Check graph health: node/edge counts, type distribution, embedding coverage."
-        );
-        let graphTotal = "";
-        const healthGraph = getGraph();
-        if (healthGraph) {
-          try {
-            const healthStats = healthGraph.stats();
-            if (healthStats.nodeCount === 0) {
-              contextParts.push("", "\u{1F4A1} Graph is empty \u2014 run `myelin parse ./your-repo` to index code");
-            } else {
-              graphTotal = `, graph: ${healthStats.nodeCount} nodes / ${healthStats.edgeCount} edges`;
-              const embStats = healthGraph.embeddingStats();
-              if (!embStats.vecAvailable || embStats.embeddedNodes === 0) {
-                contextParts.push("", "\u2139\uFE0F Search uses FTS5 keywords. Run `myelin embed` to add optional semantic boost.");
-              }
-            }
-          } catch {
-          } finally {
-            healthGraph.close();
-          }
-        }
-        const agentLabel = detectedAgent ?? "generic";
-        const parts = [`agent=${agentLabel}`];
-        if (briefingNodeCount > 0) parts.push(`${briefingNodeCount} knowledge nodes`);
-        if (logCount > 0) parts.push(`${logCount} recent logs`);
-        console.error(`[myelin] Auto-boot: ${parts.join(", ")}${graphTotal}`);
-        if (contextParts.length > 0) {
-          pendingBootContext = contextParts.join("\n");
-          hookLog(`onSessionStart built context: ${pendingBootContext.length} chars`);
+        pendingBootContext = buildBootContext();
+        const agentLabel = sessionAgent ?? "generic";
+        if (pendingBootContext) {
+          hookLog(`onSessionStart built context: ${pendingBootContext.length} chars, agent=${agentLabel}`);
         } else {
-          hookLog(`onSessionStart: no context parts built`);
+          hookLog(`onSessionStart: no context built, agent=${agentLabel}`);
         }
+        console.error(`[myelin] Auto-boot: agent=${agentLabel}, context=${pendingBootContext ? pendingBootContext.length + " chars" : "none"}`);
       } catch (e) {
         hookLog(`onSessionStart error: ${e.message}`);
         console.error(`[myelin] Boot error: ${e.message}`);
       }
     },
     // Inject boot context on the first user prompt via modifiedPrompt.
-    // The CLI reads modifiedPrompt from this hook (unlike onSessionStart's additionalContext).
+    // Self-healing: if onSessionStart didn't fire or failed, builds context here.
     // Filed github/copilot-cli#2142 for the additionalContext bug.
     onUserPromptSubmitted: async (input, _invocation) => {
-      hookLog(`onUserPromptSubmitted fired \u2014 pendingBootContext: ${pendingBootContext ? pendingBootContext.length + " chars" : "null"}`);
-      if (!pendingBootContext) return;
+      if (bootContextInjected) return;
+      if (!pendingBootContext) {
+        hookLog(`onUserPromptSubmitted: pendingBootContext is null, building context now (self-heal)`);
+        pendingBootContext = buildBootContext();
+      }
+      if (!pendingBootContext) {
+        hookLog(`onUserPromptSubmitted: no context available even after self-heal`);
+        bootContextInjected = true;
+        return;
+      }
       const context = pendingBootContext;
       pendingBootContext = null;
+      bootContextInjected = true;
       hookLog(`onUserPromptSubmitted injecting modifiedPrompt (${context.length} chars)`);
       return {
         modifiedPrompt: `<myelin_boot_context>
