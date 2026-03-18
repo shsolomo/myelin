@@ -52,7 +52,7 @@ var import_copilot_sdk = __toESM(require_copilot_sdk(), 1);
 var import_extension = __toESM(require_extension(), 1);
 import { homedir as homedir4 } from "node:os";
 import { join as join4 } from "node:path";
-import { existsSync as existsSync3 } from "node:fs";
+import { existsSync as existsSync3, appendFileSync as appendFileSync2 } from "node:fs";
 
 // src/memory/graph.ts
 var import_better_sqlite3 = __toESM(require_better_sqlite3(), 1);
@@ -1846,7 +1846,15 @@ function pruneOrphanEdges(graph) {
 // src/extension/extension.in-process.ts
 var WORKING_MEMORY = join4(homedir4(), ".copilot", ".working-memory");
 var DB_PATH = join4(WORKING_MEMORY, "graph.db");
+var HOOK_LOG = join4(WORKING_MEMORY, "myelin-hook-diagnostic.log");
 var MYELIN_VERSION = "0.10.4";
+function hookLog(msg) {
+  try {
+    appendFileSync2(HOOK_LOG, `${(/* @__PURE__ */ new Date()).toISOString()} ${msg}
+`);
+  } catch {
+  }
+}
 var sessionAgent = null;
 var taskCompleteLogged = false;
 var pendingBootContext = null;
@@ -1862,7 +1870,8 @@ var session = await (0, import_extension.joinSession)({
     // Context is cached in pendingBootContext and injected via onUserPromptSubmitted.
     onSessionStart: async (_input, _invocation) => {
       try {
-        console.error(`[myelin] v${MYELIN_VERSION} loaded \u2014 5 tools, 4 hooks`);
+        hookLog(`onSessionStart fired \u2014 v${MYELIN_VERSION}`);
+        console.error(`[myelin] v${MYELIN_VERSION} loaded \u2014 6 tools, 4 hooks`);
         if (!existsSync3(DB_PATH)) {
           console.error("[myelin] No graph database found. Run `myelin init` to create one.");
           return;
@@ -1968,17 +1977,24 @@ var session = await (0, import_extension.joinSession)({
         console.error(`[myelin] Auto-boot: ${parts.join(", ")}${graphTotal}`);
         if (contextParts.length > 0) {
           pendingBootContext = contextParts.join("\n");
+          hookLog(`onSessionStart built context: ${pendingBootContext.length} chars`);
+        } else {
+          hookLog(`onSessionStart: no context parts built`);
         }
       } catch (e) {
+        hookLog(`onSessionStart error: ${e.message}`);
         console.error(`[myelin] Boot error: ${e.message}`);
       }
     },
     // Inject boot context on the first user prompt via modifiedPrompt.
     // The CLI reads modifiedPrompt from this hook (unlike onSessionStart's additionalContext).
+    // Filed github/copilot-cli#2142 for the additionalContext bug.
     onUserPromptSubmitted: async (input, _invocation) => {
+      hookLog(`onUserPromptSubmitted fired \u2014 pendingBootContext: ${pendingBootContext ? pendingBootContext.length + " chars" : "null"}`);
       if (!pendingBootContext) return;
       const context = pendingBootContext;
       pendingBootContext = null;
+      hookLog(`onUserPromptSubmitted injecting modifiedPrompt (${context.length} chars)`);
       return {
         modifiedPrompt: `<myelin_boot_context>
 ${context}
