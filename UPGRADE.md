@@ -61,6 +61,30 @@ myelin doctor       # check everything is healthy
 ---
 
 ## Version History
+
+### v0.10.2 — Distribution & Multi-Agent Install
+
+**Upgrade action:**
+- **npm global users:** `myelin update`
+- **Package install users:** Update your packages skill first, then update myelin:
+  ```bash
+  # Update the packages skill (one-time, needed for new sourcePath support)
+  gh api repos/shsolomo/myelin/contents/.github/skills/packages/packages.cjs --jq '.content' | base64 -d > .github/skills/packages/packages.cjs
+  gh api repos/shsolomo/myelin/contents/.github/skills/packages/SKILL.md --jq '.content' | base64 -d > .github/skills/packages/SKILL.md
+  # Then tell your agent: "check for updates from shsolomo/myelin"
+  ```
+
+**What changed:**
+
+- **Distribution path moved** — Extension distribution artifacts moved from `.github/extensions/myelin/` to `.github/package/myelin/` to prevent the Copilot CLI from auto-loading a duplicate extension when developing in the myelin repo.
+- **`sourcePath` support in packages skill** — Registry entries now support a `sourcePath` field that tells the packages skill where to find files in the source repo when it differs from the install destination. Backward compatible — if omitted, `path` is used for both (existing behavior).
+- **User-level install guidance** — INSTALL.md and UPGRADE.md now recommend installing at `~/.copilot/extensions/myelin/` for multi-agent environments so all agents share one graph.
+- **`npm run deploy` workflow** — New dev command: `tsc → bundle → deploy to ~/.copilot/extensions/myelin/`. Separated from the shared `bundle-extension.mjs` so dev-only logic doesn't ship to consumers.
+
+**Breaking changes:**
+- Package install users must update their local `packages.cjs` before upgrading (see above). The old skill will fail to find files at the new distribution path. New installs are unaffected.
+
+---
 
 ### v0.10.0 — Resumable Parallel Sleep
 
