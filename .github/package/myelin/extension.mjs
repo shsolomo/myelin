@@ -1849,6 +1849,7 @@ var DB_PATH = join4(WORKING_MEMORY, "graph.db");
 var MYELIN_VERSION = "0.10.4";
 var sessionAgent = null;
 var taskCompleteLogged = false;
+var pendingBootContext = null;
 function getGraph() {
   if (!existsSync3(DB_PATH)) return null;
   return new KnowledgeGraph(DB_PATH);
@@ -1856,9 +1857,9 @@ function getGraph() {
 var session = await (0, import_extension.joinSession)({
   onPermissionRequest: import_copilot_sdk.approveAll,
   hooks: {
-    // NOTE: `session` is NOT yet assigned when onSessionStart fires — joinSession()
-    // calls this hook during its own execution, before the return value is assigned.
-    // All logging here must use console.error (stderr), not session.log().
+    // Build boot context eagerly but DON'T return additionalContext — the Copilot CLI
+    // v1.0.8 ignores the return value from onSessionStart hooks (fire-and-forget).
+    // Context is cached in pendingBootContext and injected via onUserPromptSubmitted.
     onSessionStart: async (_input, _invocation) => {
       try {
         console.error(`[myelin] v${MYELIN_VERSION} loaded \u2014 5 tools, 4 hooks`);
@@ -1870,19 +1871,15 @@ var session = await (0, import_extension.joinSession)({
         if (detectedAgent) {
           sessionAgent = detectedAgent;
         }
-        let briefing;
+        const contextParts = [];
         let briefingNodeCount = 0;
         try {
-          briefing = getBootContext(detectedAgent, { dbPath: DB_PATH });
+          const briefing = getBootContext(detectedAgent, { dbPath: DB_PATH });
           const nodeMatch = briefing.match(/_(\d+) nodes/);
           if (nodeMatch) briefingNodeCount = parseInt(nodeMatch[1], 10);
+          if (briefing) contextParts.push(briefing);
         } catch (bootErr) {
           console.error(`[myelin] Graph boot failed: ${bootErr.message}`);
-          briefing = "";
-        }
-        const contextParts = [];
-        if (briefing) {
-          contextParts.push(briefing);
         }
         let logCount = 0;
         if (detectedAgent) {
@@ -1969,12 +1966,26 @@ var session = await (0, import_extension.joinSession)({
         if (briefingNodeCount > 0) parts.push(`${briefingNodeCount} knowledge nodes`);
         if (logCount > 0) parts.push(`${logCount} recent logs`);
         console.error(`[myelin] Auto-boot: ${parts.join(", ")}${graphTotal}`);
-        return {
-          additionalContext: contextParts.join("\n")
-        };
+        if (contextParts.length > 0) {
+          pendingBootContext = contextParts.join("\n");
+        }
       } catch (e) {
         console.error(`[myelin] Boot error: ${e.message}`);
       }
+    },
+    // Inject boot context on the first user prompt via modifiedPrompt.
+    // The CLI reads modifiedPrompt from this hook (unlike onSessionStart's additionalContext).
+    onUserPromptSubmitted: async (input, _invocation) => {
+      if (!pendingBootContext) return;
+      const context = pendingBootContext;
+      pendingBootContext = null;
+      return {
+        modifiedPrompt: `<myelin_boot_context>
+${context}
+</myelin_boot_context>
+
+${input.prompt}`
+      };
     },
     onSessionEnd: async (input, _invocation) => {
       if (taskCompleteLogged) return;

@@ -5,8 +5,9 @@
  * It imports myelin's graph library directly — no subprocess spawning.
  *
  * Tools: myelin_query, myelin_boot, myelin_log, myelin_show, myelin_stats, myelin_sleep
- * Hooks: onSessionStart (boot prompt + tool guidance), onPostToolUse (auto-log task_complete),
- *        onSessionEnd (auto-log fallback), onErrorOccurred (resilience)
+ * Hooks: onSessionStart (boot context build), onUserPromptSubmitted (inject boot context),
+ *        onPostToolUse (auto-log task_complete), onSessionEnd (auto-log fallback),
+ *        onErrorOccurred (resilience)
  */
 
 import { homedir } from "node:os";
@@ -28,6 +29,9 @@ const MYELIN_VERSION = __MYELIN_VERSION__;
 // Session-level agent identity — set when myelin_boot is called
 let sessionAgent: string | null = null;
 let taskCompleteLogged = false;
+// Boot context is built eagerly in onSessionStart, injected via onUserPromptSubmitted
+// because the CLI ignores additionalContext from onSessionStart (fire-and-forget).
+let pendingBootContext: string | null = null;
 
 /** Get a graph instance, or null if db doesn't exist. */
 function getGraph(): KnowledgeGraph | null {
@@ -40,9 +44,9 @@ const session = await joinSession({
   onPermissionRequest: approveAll,
 
   hooks: {
-    // NOTE: `session` is NOT yet assigned when onSessionStart fires — joinSession()
-    // calls this hook during its own execution, before the return value is assigned.
-    // All logging here must use console.error (stderr), not session.log().
+    // Build boot context eagerly but DON'T return additionalContext — the Copilot CLI
+    // v1.0.8 ignores the return value from onSessionStart hooks (fire-and-forget).
+    // Context is cached in pendingBootContext and injected via onUserPromptSubmitted.
     onSessionStart: async (_input: any, _invocation: any) => {
       try {
         console.error(`[myelin] v${MYELIN_VERSION} loaded — 5 tools, 4 hooks`);
@@ -58,24 +62,20 @@ const session = await joinSession({
           sessionAgent = detectedAgent;
         }
 
-        let briefing: string;
-        let briefingNodeCount = 0;
-        try {
-          briefing = getBootContext(detectedAgent, { dbPath: DB_PATH });
-          const nodeMatch = briefing.match(/_(\d+) nodes/);
-          if (nodeMatch) briefingNodeCount = parseInt(nodeMatch[1], 10);
-        } catch (bootErr: any) {
-          console.error(`[myelin] Graph boot failed: ${bootErr.message}`);
-          briefing = "";
-        }
-
         const contextParts: string[] = [];
 
-        if (briefing) {
-          contextParts.push(briefing);
+        // Graph briefing
+        let briefingNodeCount = 0;
+        try {
+          const briefing = getBootContext(detectedAgent, { dbPath: DB_PATH });
+          const nodeMatch = briefing.match(/_(\d+) nodes/);
+          if (nodeMatch) briefingNodeCount = parseInt(nodeMatch[1], 10);
+          if (briefing) contextParts.push(briefing);
+        } catch (bootErr: any) {
+          console.error(`[myelin] Graph boot failed: ${bootErr.message}`);
         }
 
-        // Inject unconsolidated agent activity logs (entries past the watermark)
+        // Unconsolidated agent activity logs (entries past the watermark)
         let logCount = 0;
         if (detectedAgent) {
           try {
@@ -171,12 +171,24 @@ const session = await joinSession({
         if (logCount > 0) parts.push(`${logCount} recent logs`);
         console.error(`[myelin] Auto-boot: ${parts.join(", ")}${graphTotal}`);
 
-        return {
-          additionalContext: contextParts.join("\n"),
-        };
+        // Cache context for injection via onUserPromptSubmitted
+        if (contextParts.length > 0) {
+          pendingBootContext = contextParts.join("\n");
+        }
       } catch (e: any) {
         console.error(`[myelin] Boot error: ${e.message}`);
       }
+    },
+
+    // Inject boot context on the first user prompt via modifiedPrompt.
+    // The CLI reads modifiedPrompt from this hook (unlike onSessionStart's additionalContext).
+    onUserPromptSubmitted: async (input: any, _invocation: any) => {
+      if (!pendingBootContext) return;
+      const context = pendingBootContext;
+      pendingBootContext = null; // inject once only
+      return {
+        modifiedPrompt: `<myelin_boot_context>\n${context}\n</myelin_boot_context>\n\n${input.prompt}`,
+      };
     },
 
     onSessionEnd: async (input: any, _invocation: any) => {
