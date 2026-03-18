@@ -40,12 +40,15 @@ const session = await joinSession({
   onPermissionRequest: approveAll,
 
   hooks: {
+    // NOTE: `session` is NOT yet assigned when onSessionStart fires — joinSession()
+    // calls this hook during its own execution, before the return value is assigned.
+    // All logging here must use console.error (stderr), not session.log().
     onSessionStart: async (_input: any, _invocation: any) => {
       try {
-        await session.log(`Myelin v${MYELIN_VERSION} loaded — 5 tools, 4 hooks`);
+        console.error(`[myelin] v${MYELIN_VERSION} loaded — 5 tools, 4 hooks`);
 
         if (!existsSync(DB_PATH)) {
-          await session.log("No graph database found. Run `myelin init` to create one.", { level: "warning" });
+          console.error("[myelin] No graph database found. Run `myelin init` to create one.");
           return;
         }
 
@@ -59,11 +62,10 @@ const session = await joinSession({
         let briefingNodeCount = 0;
         try {
           briefing = getBootContext(detectedAgent, { dbPath: DB_PATH });
-          // Parse node count from briefing header: "_30 nodes, sorted by salience_"
           const nodeMatch = briefing.match(/_(\d+) nodes/);
           if (nodeMatch) briefingNodeCount = parseInt(nodeMatch[1], 10);
         } catch (bootErr: any) {
-          await session.log(`Graph boot failed: ${bootErr.message}`, { level: "warning" });
+          console.error(`[myelin] Graph boot failed: ${bootErr.message}`);
           briefing = "";
         }
 
@@ -77,7 +79,6 @@ const session = await joinSession({
         let logCount = 0;
         if (detectedAgent) {
           try {
-            // Read watermark to only show entries not yet in the graph
             let watermark: string | null = null;
             try {
               const graph = new KnowledgeGraph(DB_PATH);
@@ -164,18 +165,17 @@ const session = await joinSession({
           }
         }
 
-        // Visible boot summary — shows what was actually loaded
         const agentLabel = detectedAgent ?? "generic";
         const parts = [`agent=${agentLabel}`];
         if (briefingNodeCount > 0) parts.push(`${briefingNodeCount} knowledge nodes`);
         if (logCount > 0) parts.push(`${logCount} recent logs`);
-        await session.log(`Auto-boot: ${parts.join(", ")}${graphTotal}`);
+        console.error(`[myelin] Auto-boot: ${parts.join(", ")}${graphTotal}`);
 
         return {
           additionalContext: contextParts.join("\n"),
         };
       } catch (e: any) {
-        await session.log(`Myelin boot error: ${e.message}`, { level: "error" });
+        console.error(`[myelin] Boot error: ${e.message}`);
       }
     },
 

@@ -1856,11 +1856,14 @@ function getGraph() {
 var session = await (0, import_extension.joinSession)({
   onPermissionRequest: import_copilot_sdk.approveAll,
   hooks: {
+    // NOTE: `session` is NOT yet assigned when onSessionStart fires — joinSession()
+    // calls this hook during its own execution, before the return value is assigned.
+    // All logging here must use console.error (stderr), not session.log().
     onSessionStart: async (_input, _invocation) => {
       try {
-        await session.log(`Myelin v${MYELIN_VERSION} loaded \u2014 5 tools, 4 hooks`);
+        console.error(`[myelin] v${MYELIN_VERSION} loaded \u2014 5 tools, 4 hooks`);
         if (!existsSync3(DB_PATH)) {
-          await session.log("No graph database found. Run `myelin init` to create one.", { level: "warning" });
+          console.error("[myelin] No graph database found. Run `myelin init` to create one.");
           return;
         }
         const detectedAgent = resolveAgent();
@@ -1874,7 +1877,7 @@ var session = await (0, import_extension.joinSession)({
           const nodeMatch = briefing.match(/_(\d+) nodes/);
           if (nodeMatch) briefingNodeCount = parseInt(nodeMatch[1], 10);
         } catch (bootErr) {
-          await session.log(`Graph boot failed: ${bootErr.message}`, { level: "warning" });
+          console.error(`[myelin] Graph boot failed: ${bootErr.message}`);
           briefing = "";
         }
         const contextParts = [];
@@ -1965,12 +1968,12 @@ var session = await (0, import_extension.joinSession)({
         const parts = [`agent=${agentLabel}`];
         if (briefingNodeCount > 0) parts.push(`${briefingNodeCount} knowledge nodes`);
         if (logCount > 0) parts.push(`${logCount} recent logs`);
-        await session.log(`Auto-boot: ${parts.join(", ")}${graphTotal}`);
+        console.error(`[myelin] Auto-boot: ${parts.join(", ")}${graphTotal}`);
         return {
           additionalContext: contextParts.join("\n")
         };
       } catch (e) {
-        await session.log(`Myelin boot error: ${e.message}`, { level: "error" });
+        console.error(`[myelin] Boot error: ${e.message}`);
       }
     },
     onSessionEnd: async (input, _invocation) => {
