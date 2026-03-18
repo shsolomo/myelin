@@ -21,6 +21,13 @@ A Genesis package is any GitHub repository that contains a `.github/registry.jso
 
 Packages are referenced as `owner/repo` (e.g. `someuser/cool-extensions`). An optional `@ref` pins to a specific tag or branch (e.g. `someuser/cool-extensions@v1.0.0`).
 
+### Registry entry fields
+
+Each extension or skill entry supports:
+- `version` — semantic version string
+- `path` — where the item installs on the consumer's machine (e.g. `.github/extensions/myext`)
+- `sourcePath` — (optional) where to find the files in the source repo, if different from `path`. Useful when the source repo stores distribution artifacts at a different location to avoid conflicts (e.g. preventing auto-loading in the dev repo). If omitted, `path` is used for both.
+
 ## Natural Language Triggers
 
 - "install the weather extension from someuser/cool-extensions"

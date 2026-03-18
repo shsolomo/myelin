@@ -300,18 +300,21 @@ function install(rawSource, opts) {
 
       const isUpdate = name in (pkgEntry.installed[type] || {});
       const itemPath = info.path;
+      const sourcePath = info.sourcePath || itemPath;
 
       try {
-        const prefix = itemPath.endsWith("/") ? itemPath : itemPath + "/";
+        const prefix = sourcePath.endsWith("/") ? sourcePath : sourcePath + "/";
         const files = [];
         for (const [filePath, sha] of treeMap) {
-          if (filePath.startsWith(prefix) || filePath === itemPath) {
-            files.push({ path: filePath, sha });
+          if (filePath.startsWith(prefix) || filePath === sourcePath) {
+            // Remap from sourcePath to itemPath for local install
+            const localRelPath = itemPath + filePath.slice(sourcePath.length);
+            files.push({ path: localRelPath, sha });
           }
         }
 
         if (files.length === 0) {
-          result.errors.push({ name, error: `No files found in tree under ${itemPath}` });
+          result.errors.push({ name, error: `No files found in tree under ${sourcePath}` });
           continue;
         }
 
