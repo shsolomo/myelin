@@ -56,8 +56,8 @@ jobs:
           mkdir -p "$EXT_DIR"
 
           # Download extension.mjs and package.json directly from the known path
-          gh api repos/shsolomo/myelin/contents/.github/extensions/myelin/extension.mjs --jq '.content' | base64 -d > "$EXT_DIR/extension.mjs"
-          gh api repos/shsolomo/myelin/contents/.github/extensions/myelin/package.json --jq '.content' | base64 -d > "$EXT_DIR/package.json"
+          gh api repos/shsolomo/myelin/contents/.github/package/myelin/extension.mjs --jq '.content' | base64 -d > "$EXT_DIR/extension.mjs"
+          gh api repos/shsolomo/myelin/contents/.github/package/myelin/package.json --jq '.content' | base64 -d > "$EXT_DIR/package.json"
 
           # Install native deps
           cd "$EXT_DIR" && npm install --omit=dev
@@ -120,8 +120,8 @@ jobs:
           mkdir -p "$EXT_DIR"
 
           # Download v0.8.0 extension
-          gh api repos/shsolomo/myelin/contents/.github/extensions/myelin/extension.mjs?ref=v0.8.0 --jq '.content' | base64 -d > "$EXT_DIR/extension.mjs"
-          gh api repos/shsolomo/myelin/contents/.github/extensions/myelin/package.json?ref=v0.8.0 --jq '.content' | base64 -d > "$EXT_DIR/package.json"
+          gh api repos/shsolomo/myelin/contents/.github/package/myelin/extension.mjs?ref=v0.8.0 --jq '.content' | base64 -d > "$EXT_DIR/extension.mjs"
+          gh api repos/shsolomo/myelin/contents/.github/package/myelin/package.json?ref=v0.8.0 --jq '.content' | base64 -d > "$EXT_DIR/package.json"
           cd "$EXT_DIR" && npm install --omit=dev
           echo "✅ v0.8.0 extension installed"
 
@@ -132,8 +132,8 @@ jobs:
           EXT_DIR="$HOME/.copilot/extensions/myelin"
 
           # Re-download latest extension (simulates package update)
-          gh api repos/shsolomo/myelin/contents/.github/extensions/myelin/extension.mjs --jq '.content' | base64 -d > "$EXT_DIR/extension.mjs"
-          gh api repos/shsolomo/myelin/contents/.github/extensions/myelin/package.json --jq '.content' | base64 -d > "$EXT_DIR/package.json"
+          gh api repos/shsolomo/myelin/contents/.github/package/myelin/extension.mjs --jq '.content' | base64 -d > "$EXT_DIR/extension.mjs"
+          gh api repos/shsolomo/myelin/contents/.github/package/myelin/package.json --jq '.content' | base64 -d > "$EXT_DIR/package.json"
           cd "$EXT_DIR" && npm install --omit=dev
           echo "✅ Latest extension installed"
 

@@ -11,4 +11,4 @@ dist/
 *.sqlite
 
 # Genesis package — node_modules installed by packages skill
-.github/extensions/myelin/node_modules/
+.github/package/myelin/node_modules/

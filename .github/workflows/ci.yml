@@ -65,6 +65,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .github/extensions/myelin/extension.mjs .github/registry.json
+          git add .github/package/myelin/extension.mjs .github/registry.json
           git diff --cached --quiet || git commit -m "chore: sync genesis package bundle and registry"
           git push
