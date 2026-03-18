@@ -28,7 +28,7 @@
   "scripts": {
     "build": "tsc",
     "bundle-extension": "node scripts/bundle-extension.mjs",
-    "deploy": "tsc && node scripts/bundle-extension.mjs",
+    "deploy": "tsc && node scripts/bundle-extension.mjs && node scripts/deploy-local.mjs",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
