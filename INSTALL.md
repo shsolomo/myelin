@@ -6,14 +6,29 @@ Myelin gives your Copilot CLI agents persistent, searchable memory across sessio
 
 ---
 
+## Where to Install
+
+Myelin can be installed at two scopes:
+
+| Scope | Location | When to use |
+|-------|----------|-------------|
+| **User-level** | `~/.copilot/extensions/myelin/` | **Recommended.** Loads for every agent, every project, every session. All agents share one graph. |
+| **Project-level** | `.github/extensions/myelin/` | Only loads when the CLI's working directory is that project. Useful for single-project setups. |
+
+**If you run multiple agents** (or plan to), install at the user level. This way Donna, Hebb, Cajal — or whatever agents you build — all share the same knowledge graph and memory infrastructure. No per-project setup needed.
+
+---
+
 ## Two Ways to Install
 
 | Method | Best for | What happens |
 |--------|----------|-------------|
 | **Package install** | Copilot CLI agents | Downloads pre-built extension + native deps only |
-| **npm global** | CLI power users, custom setups | Full npm install with all dependencies |
+| **npm global** | Multi-agent setups, CLI power users | Full npm install, user-level by default |
 
-The package method is **recommended** — it's faster, avoids common Windows install issues, and supports version tracking with automatic update checks.
+The package method is **recommended for getting started** — it's faster, avoids common Windows install issues, and supports version tracking with automatic update checks. It installs to the project level (`.github/extensions/`).
+
+For multi-agent environments, **Method 2 (npm global)** is recommended — it installs to `~/.copilot/extensions/myelin/` by default, giving all agents shared memory.
 
 ---
 
@@ -59,6 +74,15 @@ That's it. Your agent now has memory.
 
 Restart your Copilot CLI session. The extension loads automatically — 5 tools + 3 hooks, ready to go.
 
+> **Multi-agent tip:** The package install lands at the project level (`.github/extensions/myelin/`). To share memory across all agents and projects, move it to user level:
+> ```bash
+> # Move from project to user level
+> mkdir -p ~/.copilot/extensions/myelin
+> cp .github/extensions/myelin/* ~/.copilot/extensions/myelin/
+> cd ~/.copilot/extensions/myelin && npm install --omit=dev
+> ```
+> Or use Method 2 (npm global) which installs to user level by default.
+
 ### Checking for updates
 
 ```
@@ -69,7 +93,9 @@ The packages skill compares your installed version against the latest in the mye
 
 ---
 
-## Method 2: npm Global Install
+## Method 2: npm Global Install (Recommended for Multi-Agent)
+
+This method installs myelin globally and sets up the extension at user level (`~/.copilot/extensions/myelin/`). All agents share the same extension and knowledge graph regardless of which project they're working in.
 
 ### 1. Install myelin
 

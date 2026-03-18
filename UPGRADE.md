@@ -2,6 +2,17 @@
 
 How to upgrade between versions and what changed. Agents: use this doc to guide users through upgrades.
 
+## Where is Myelin Installed?
+
+Before upgrading, know which scope you're updating:
+
+| Scope | Location | How to check |
+|-------|----------|-------------|
+| **User-level** | `~/.copilot/extensions/myelin/` | `ls ~/.copilot/extensions/myelin/extension.mjs` |
+| **Project-level** | `.github/extensions/myelin/` | `ls .github/extensions/myelin/extension.mjs` |
+
+If you have both, the user-level install takes precedence. For multi-agent setups, upgrade the user-level install — that's what all your agents use.
+
 ## How to Upgrade
 
 ### npm global install (most users)
@@ -15,6 +26,20 @@ This single command:
 2. Rebuilds the Copilot CLI extension
 
 Restart Copilot CLI (or `/clear`) after upgrading.
+
+### Package install
+
+Tell your agent:
+```
+> check for updates from shsolomo/myelin
+```
+
+The packages skill compares your installed version against the latest and offers to upgrade. This updates the project-level install. If you use a user-level install, also copy the updated extension:
+
+```bash
+cp .github/extensions/myelin/* ~/.copilot/extensions/myelin/
+cd ~/.copilot/extensions/myelin && npm install --omit=dev
+```
 
 ### Clone + link install
 
