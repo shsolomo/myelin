@@ -10,8 +10,9 @@
 
 import { build } from "esbuild";
 import { dirname, join } from "node:path";
-import { readFileSync, mkdirSync, copyFileSync } from "node:fs";
+import { readFileSync, mkdirSync, copyFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
@@ -76,3 +77,16 @@ copyFileSync(
   join(genesisDir, "extension.mjs")
 );
 console.log("✅ Extension copied to .github/package/myelin/extension.mjs");
+
+// Deploy to user-level extension directory if it exists (dev dogfooding).
+// This makes every bundle immediately available to all local agents.
+const userExtDir = join(homedir(), ".copilot", "extensions", "myelin");
+if (existsSync(userExtDir)) {
+  copyFileSync(
+    join(root, "dist", "extension", "extension.mjs"),
+    join(userExtDir, "extension.mjs")
+  );
+  console.log(`✅ Extension deployed to ${userExtDir}/extension.mjs (restart CLI to pick up)`);
+} else {
+  console.log("ℹ️  User extension dir not found — skipping local deploy");
+}
