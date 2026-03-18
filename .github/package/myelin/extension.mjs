@@ -1846,7 +1846,7 @@ function pruneOrphanEdges(graph) {
 // src/extension/extension.in-process.ts
 var WORKING_MEMORY = join4(homedir4(), ".copilot", ".working-memory");
 var DB_PATH = join4(WORKING_MEMORY, "graph.db");
-var MYELIN_VERSION = "0.10.2";
+var MYELIN_VERSION = "0.10.3";
 var sessionAgent = null;
 var taskCompleteLogged = false;
 function getGraph() {
