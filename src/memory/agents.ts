@@ -28,8 +28,8 @@ const DEFAULT_DB = join(COPILOT_ROOT, ".working-memory", "graph.db");
  * Returns null if no agent can be determined.
  */
 export function resolveAgent(): string | null {
-  // Check well-known env vars that agents set
-  const envName = process.env.COPILOT_AGENT_NAME || process.env.AGENT_NAME;
+  // Check well-known env vars that agents/hosts set
+  const envName = process.env.COPILOT_AGENT || process.env.COPILOT_AGENT_NAME || process.env.AGENT_NAME;
   if (envName) return envName.toLowerCase();
 
   // Check if CWD hints at an agent-specific worktree (e.g., myelin-cajal1)

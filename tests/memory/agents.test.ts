@@ -185,8 +185,10 @@ describe('getBootContext', () => {
 
 describe('resolveAgent', () => {
   it('returns null when no env vars or CWD hints exist', () => {
+    const originalCopilotAgent = process.env.COPILOT_AGENT;
     const originalAgent = process.env.COPILOT_AGENT_NAME;
     const originalName = process.env.AGENT_NAME;
+    delete process.env.COPILOT_AGENT;
     delete process.env.COPILOT_AGENT_NAME;
     delete process.env.AGENT_NAME;
 
@@ -196,70 +198,105 @@ describe('resolveAgent', () => {
       // Result depends on actual CWD, but at minimum it shouldn't throw
       expect(result === null || typeof result === 'string').toBe(true);
     } finally {
+      if (originalCopilotAgent !== undefined) process.env.COPILOT_AGENT = originalCopilotAgent;
       if (originalAgent !== undefined) process.env.COPILOT_AGENT_NAME = originalAgent;
       if (originalName !== undefined) process.env.AGENT_NAME = originalName;
     }
   });
 
-  it('detects agent from COPILOT_AGENT_NAME env var', () => {
-    const original = process.env.COPILOT_AGENT_NAME;
-    process.env.COPILOT_AGENT_NAME = 'Donna';
-
-    try {
-      const result = resolveAgent();
-      expect(result).toBe('donna');
-    } finally {
-      if (original !== undefined) {
-        process.env.COPILOT_AGENT_NAME = original;
-      } else {
-        delete process.env.COPILOT_AGENT_NAME;
-      }
-    }
-  });
-
-  it('detects agent from AGENT_NAME env var', () => {
-    const originalCopilot = process.env.COPILOT_AGENT_NAME;
-    const originalAgent = process.env.AGENT_NAME;
+  it('detects agent from COPILOT_AGENT env var', () => {
+    const origCA = process.env.COPILOT_AGENT;
+    const origCAN = process.env.COPILOT_AGENT_NAME;
+    const origAN = process.env.AGENT_NAME;
     delete process.env.COPILOT_AGENT_NAME;
-    process.env.AGENT_NAME = 'Hebb';
+    delete process.env.AGENT_NAME;
+    process.env.COPILOT_AGENT = 'Hebb';
 
     try {
-      const result = resolveAgent();
-      expect(result).toBe('hebb');
+      expect(resolveAgent()).toBe('hebb');
     } finally {
-      if (originalCopilot !== undefined) process.env.COPILOT_AGENT_NAME = originalCopilot;
-      else delete process.env.COPILOT_AGENT_NAME;
-      if (originalAgent !== undefined) process.env.AGENT_NAME = originalAgent;
-      else delete process.env.AGENT_NAME;
+      if (origCA !== undefined) process.env.COPILOT_AGENT = origCA; else delete process.env.COPILOT_AGENT;
+      if (origCAN !== undefined) process.env.COPILOT_AGENT_NAME = origCAN; else delete process.env.COPILOT_AGENT_NAME;
+      if (origAN !== undefined) process.env.AGENT_NAME = origAN; else delete process.env.AGENT_NAME;
     }
   });
 
-  it('COPILOT_AGENT_NAME takes priority over AGENT_NAME', () => {
-    const originalCopilot = process.env.COPILOT_AGENT_NAME;
-    const originalAgent = process.env.AGENT_NAME;
-    process.env.COPILOT_AGENT_NAME = 'Cajal';
-    process.env.AGENT_NAME = 'Hebb';
-
-    try {
-      const result = resolveAgent();
-      expect(result).toBe('cajal');
-    } finally {
-      if (originalCopilot !== undefined) process.env.COPILOT_AGENT_NAME = originalCopilot;
-      else delete process.env.COPILOT_AGENT_NAME;
-      if (originalAgent !== undefined) process.env.AGENT_NAME = originalAgent;
-      else delete process.env.AGENT_NAME;
-    }
-  });
-
-  it('lowercases the agent name', () => {
-    const original = process.env.COPILOT_AGENT_NAME;
-    process.env.COPILOT_AGENT_NAME = 'DONNA';
+  it('detects agent from COPILOT_AGENT_NAME env var', () => {
+    const origCA = process.env.COPILOT_AGENT;
+    const origCAN = process.env.COPILOT_AGENT_NAME;
+    delete process.env.COPILOT_AGENT;
+    process.env.COPILOT_AGENT_NAME = 'Donna';
 
     try {
       expect(resolveAgent()).toBe('donna');
     } finally {
-      if (original !== undefined) process.env.COPILOT_AGENT_NAME = original;
-      else delete process.env.COPILOT_AGENT_NAME;
+      if (origCA !== undefined) process.env.COPILOT_AGENT = origCA; else delete process.env.COPILOT_AGENT;
+      if (origCAN !== undefined) process.env.COPILOT_AGENT_NAME = origCAN; else delete process.env.COPILOT_AGENT_NAME;
+    }
+  });
+
+  it('detects agent from AGENT_NAME env var', () => {
+    const origCA = process.env.COPILOT_AGENT;
+    const origCAN = process.env.COPILOT_AGENT_NAME;
+    const origAN = process.env.AGENT_NAME;
+    delete process.env.COPILOT_AGENT;
+    delete process.env.COPILOT_AGENT_NAME;
+    process.env.AGENT_NAME = 'Hebb';
+
+    try {
+      expect(resolveAgent()).toBe('hebb');
+    } finally {
+      if (origCA !== undefined) process.env.COPILOT_AGENT = origCA; else delete process.env.COPILOT_AGENT;
+      if (origCAN !== undefined) process.env.COPILOT_AGENT_NAME = origCAN; else delete process.env.COPILOT_AGENT_NAME;
+      if (origAN !== undefined) process.env.AGENT_NAME = origAN; else delete process.env.AGENT_NAME;
+    }
+  });
+
+  it('COPILOT_AGENT takes priority over COPILOT_AGENT_NAME and AGENT_NAME', () => {
+    const origCA = process.env.COPILOT_AGENT;
+    const origCAN = process.env.COPILOT_AGENT_NAME;
+    const origAN = process.env.AGENT_NAME;
+    process.env.COPILOT_AGENT = 'Donna';
+    process.env.COPILOT_AGENT_NAME = 'Cajal';
+    process.env.AGENT_NAME = 'Hebb';
+
+    try {
+      expect(resolveAgent()).toBe('donna');
+    } finally {
+      if (origCA !== undefined) process.env.COPILOT_AGENT = origCA; else delete process.env.COPILOT_AGENT;
+      if (origCAN !== undefined) process.env.COPILOT_AGENT_NAME = origCAN; else delete process.env.COPILOT_AGENT_NAME;
+      if (origAN !== undefined) process.env.AGENT_NAME = origAN; else delete process.env.AGENT_NAME;
+    }
+  });
+
+  it('COPILOT_AGENT_NAME takes priority over AGENT_NAME', () => {
+    const origCA = process.env.COPILOT_AGENT;
+    const origCAN = process.env.COPILOT_AGENT_NAME;
+    const origAN = process.env.AGENT_NAME;
+    delete process.env.COPILOT_AGENT;
+    process.env.COPILOT_AGENT_NAME = 'Cajal';
+    process.env.AGENT_NAME = 'Hebb';
+
+    try {
+      expect(resolveAgent()).toBe('cajal');
+    } finally {
+      if (origCA !== undefined) process.env.COPILOT_AGENT = origCA; else delete process.env.COPILOT_AGENT;
+      if (origCAN !== undefined) process.env.COPILOT_AGENT_NAME = origCAN; else delete process.env.COPILOT_AGENT_NAME;
+      if (origAN !== undefined) process.env.AGENT_NAME = origAN; else delete process.env.AGENT_NAME;
+    }
+  });
+
+  it('lowercases the agent name', () => {
+    const origCA = process.env.COPILOT_AGENT;
+    const origCAN = process.env.COPILOT_AGENT_NAME;
+    delete process.env.COPILOT_AGENT_NAME;
+    process.env.COPILOT_AGENT = 'DONNA';
+
+    try {
+      expect(resolveAgent()).toBe('donna');
+    } finally {
+      if (origCA !== undefined) process.env.COPILOT_AGENT = origCA; else delete process.env.COPILOT_AGENT;
+      if (origCAN !== undefined) process.env.COPILOT_AGENT_NAME = origCAN; else delete process.env.COPILOT_AGENT_NAME;
     }
   });
 });

@@ -1033,7 +1033,7 @@ var AGENTS_DIR = join2(COPILOT_ROOT2, "agents");
 var AGENT_LOGS_DIR2 = join2(COPILOT_ROOT2, ".working-memory", "agents");
 var DEFAULT_DB = join2(COPILOT_ROOT2, ".working-memory", "graph.db");
 function resolveAgent() {
-  const envName = process.env.COPILOT_AGENT_NAME || process.env.AGENT_NAME;
+  const envName = process.env.COPILOT_AGENT || process.env.COPILOT_AGENT_NAME || process.env.AGENT_NAME;
   if (envName) return envName.toLowerCase();
   const cwd = process.cwd();
   const cwdMatch = cwd.match(/myelin-(\w+)\d*$/i);

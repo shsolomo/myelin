@@ -138,11 +138,34 @@ Start a new Copilot CLI session (or run `/clear`). The extension loads automatic
 
 | Hook | What it does |
 |------|-------------|
-| `onSessionStart` | Auto-detects the agent and injects graph context + tool guidance |
+| `onSessionStart` | Auto-detects agent (via `COPILOT_AGENT` env var) and injects graph context + tool guidance |
 | `onSessionEnd` | Auto-logs a session summary |
 | `onErrorOccurred` | Retries on recoverable model errors |
 
-### 4. Index your code (optional but recommended)
+### 4. Enable agent-specific context (recommended for multi-agent)
+
+The `onSessionStart` hook auto-detects which agent is running and injects relevant graph knowledge. For this to work, set the `COPILOT_AGENT` environment variable before launching the CLI:
+
+```bash
+# Set the agent name before launching
+COPILOT_AGENT=myagent copilot --agent myagent
+```
+
+**PowerShell:**
+```powershell
+$env:COPILOT_AGENT = "myagent"; copilot --agent myagent
+```
+
+Or define aliases for your agents:
+```powershell
+function myagent { $env:COPILOT_AGENT = "myagent"; copilot --agent myagent @args }
+```
+
+Without `COPILOT_AGENT`, the extension still loads and all tools work — but boot context will be generic rather than agent-specific. If you only use one agent, this step is optional.
+
+> **Why an env var?** The Copilot CLI doesn't currently expose the `--agent` name to extensions via the `onSessionStart` hook input. We've filed a [feature request](https://github.com/github/copilot-cli/issues/2136) to add this. Once the CLI supports it natively, this env var workaround won't be needed.
+
+### 5. Index your code (optional but recommended)
 
 ```bash
 myelin parse ./path/to/your-repo --namespace repo:my-project

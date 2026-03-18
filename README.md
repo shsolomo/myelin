@@ -45,6 +45,11 @@ myelin setup-extension
 
 That's it. `setup-extension` initializes the graph database, bundles the Copilot CLI extension, and installs native dependencies. Restart Copilot CLI and every agent has memory.
 
+**For agent-specific context**, set `COPILOT_AGENT` before launching:
+```bash
+COPILOT_AGENT=myagent copilot --agent myagent
+```
+
 See [INSTALL.md](INSTALL.md) for detailed setup and troubleshooting. See [UPGRADE.md](UPGRADE.md) for upgrading between versions.
 
 ## What Agents Get
@@ -65,7 +70,7 @@ After setup, every Copilot CLI agent automatically gets:
 
 | Hook | What it does |
 |------|-------------|
-| `onSessionStart` | Auto-detects agent, injects graph context + tool guidance |
+| `onSessionStart` | Auto-detects agent (via `COPILOT_AGENT` env var), injects graph context + tool guidance |
 | `onSessionEnd` | Logs session summary automatically |
 | `onErrorOccurred` | Retries on recoverable model errors |
 
