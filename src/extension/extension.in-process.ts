@@ -5,10 +5,9 @@
  * It imports myelin's graph library directly — no subprocess spawning.
  *
  * Tools: myelin_query, myelin_boot, myelin_log, myelin_show, myelin_stats, myelin_sleep
- * Hooks: onSessionStart (log), onPostToolUse (auto-log task_complete),
- *        onSessionEnd (auto-log fallback), onErrorOccurred (resilience)
- * Boot: Context built eagerly at module load. Injected via session.on("user.message")
- *       on first user message — bypasses CLI v1.0.8 hook overwrite bug.
+ * Hooks: Diagnostic-only (CLI v1.0.8 #2076 overwrites them in multi-extension setups)
+ * Events: session.on("user.message") for boot, session.on("session.task_complete") for
+ *         auto-logging, session.on("session.shutdown") for session-end fallback
  */
 
 import { homedir } from "node:os";
@@ -170,53 +169,15 @@ const session = await joinSession({
   onPermissionRequest: approveAll,
 
   hooks: {
-    onSessionStart: async () => {
-      hookLog(`onSessionStart fired — v${MYELIN_VERSION}`);
-    },
-
-    // Context injection moved to session.on("user.message") — hooks unreliable in CLI v1.0.8
+    onSessionStart: async () => { hookLog(`onSessionStart fired — v${MYELIN_VERSION}`); },
     onUserPromptSubmitted: async () => {},
-
-    onSessionEnd: async (input: any, _invocation: any) => {
-      if (taskCompleteLogged) return; // Already logged via onPostToolUse
-      try {
-        const agent = sessionAgent || resolveAgent() || 'default';
-        const summary = input.finalMessage
-          ? input.finalMessage.slice(0, 200)
-          : 'Session ended (no final message)';
-        appendStructuredLog(agent, 'handover', summary, {
-          tags: ['auto-session-end'],
-        });
-      } catch {
-        // Silent
-      }
-    },
-
-    onErrorOccurred: async (input: any, _invocation: any) => {
+    onSessionEnd: async () => { hookLog('onSessionEnd fired'); },
+    onPostToolUse: async () => { hookLog('onPostToolUse fired'); },
+    onErrorOccurred: async (input: any) => {
+      hookLog('onErrorOccurred fired');
+      // Keep retry as best-effort — needs return value, can't do from events
       if (input.recoverable && input.errorContext === "model_call") {
         return { errorHandling: "retry" as const, retryCount: 2 };
-      }
-    },
-
-    onPostToolUse: async (input: any) => {
-      if (input.toolName === 'task_complete') {
-        const summary = input.toolArgs?.summary;
-        const agent = sessionAgent || resolveAgent() || 'default';
-        if (summary) {
-          try {
-            appendStructuredLog(agent, 'action', summary, {
-              tags: ['auto-task-complete'],
-            });
-            taskCompleteLogged = true;
-          } catch {
-            // Non-fatal — don't break session end
-          }
-        }
-        if (!summary) {
-          return {
-            additionalContext: 'You completed a task without a summary. Consider calling myelin_log to record what was accomplished.',
-          };
-        }
       }
     },
   },
@@ -550,3 +511,38 @@ if (eagerBootContext) {
     });
   });
 }
+
+// Auto-log task_complete summaries via event listener.
+// Bypasses CLI hook overwrite bug — session.on() is per-connection.
+session.on("session.task_complete", (event: any) => {
+  if (taskCompleteLogged) return;
+  taskCompleteLogged = true;
+  const summary = event.data?.summary;
+  const agent = sessionAgent || resolveAgent() || 'default';
+  if (summary) {
+    try {
+      appendStructuredLog(agent, 'action', summary, {
+        tags: ['auto-task-complete'],
+      });
+      hookLog(`session.task_complete logged: ${summary.slice(0, 80)}`);
+    } catch { /* non-fatal */ }
+  }
+});
+
+// Auto-log session end as fallback if task_complete wasn't called.
+session.on("session.shutdown", (event: any) => {
+  if (taskCompleteLogged) return;
+  const agent = sessionAgent || resolveAgent() || 'default';
+  const shutdownType = event.data?.shutdownType || 'routine';
+  try {
+    appendStructuredLog(agent, 'handover', `Session ended (${shutdownType})`, {
+      tags: ['auto-session-end'],
+    });
+    hookLog(`session.shutdown logged: ${shutdownType}`);
+  } catch { /* silent */ }
+});
+
+// Log errors via event listener (retry logic stays in hook as best-effort).
+session.on("session.error", (event: any) => {
+  hookLog(`session.error: ${event.data?.errorType} — ${event.data?.message}`);
+});
