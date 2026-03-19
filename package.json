@@ -1,6 +1,6 @@
 {
   "name": "myelin",
-  "version": "0.10.4",
+  "version": "0.10.5",
   "description": "Knowledge graph memory system for AI agents. FTS5 search, LLM-driven consolidation, brain-inspired memory.",
   "type": "module",
   "main": "dist/index.js",

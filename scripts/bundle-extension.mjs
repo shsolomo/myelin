@@ -72,14 +72,3 @@ if (!globalThis.require) { globalThis.require = __createRequire(import.meta.url)
 });
 
 console.log("✅ Extension bundled to dist/extension/extension.mjs");
-
-// Copy to .github/package/myelin/ for genesis package distribution
-// NOT .github/extensions/ — that path is auto-loaded by the CLI as a project extension,
-// which conflicts with the user-level install at ~/.copilot/extensions/myelin/
-const genesisDir = join(root, ".github", "package", "myelin");
-mkdirSync(genesisDir, { recursive: true });
-copyFileSync(
-  join(root, "dist", "extension", "extension.mjs"),
-  join(genesisDir, "extension.mjs")
-);
-console.log("✅ Extension copied to .github/package/myelin/extension.mjs");
