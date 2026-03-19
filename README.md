@@ -30,10 +30,10 @@ Myelin gives AI agents persistent, searchable memory across sessions. It uses br
                             │
               ┌─────────────┼─────────────┐
               ▼             ▼             ▼
-         5 Tools       4 Hooks      CLI Commands
+         6 Tools       3 Events     CLI Commands
          (query,       (auto-boot,  (parse, ingest,
-          boot,         context,     sleep, query,
-          log...)       auto-log)    embed...)
+          boot, log,    auto-log,    sleep, query,
+          sleep...)     shutdown)    embed...)
 ```
 
 ## Install
@@ -50,13 +50,13 @@ That's it. `setup-extension` initializes the graph database, bundles the Copilot
 COPILOT_AGENT=myagent copilot --agent myagent
 ```
 
-See [INSTALL.md](INSTALL.md) for detailed setup and troubleshooting. See [UPGRADE.md](UPGRADE.md) for upgrading between versions.
+See [INSTALL.md](INSTALL.md) for detailed setup and troubleshooting. See [UPGRADE.md](UPGRADE.md) for upgrading between versions. See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 ## What Agents Get
 
 After setup, every Copilot CLI agent automatically gets:
 
-**5 tools:**
+**6 tools:**
 
 | Tool | What it does |
 |------|-------------|
@@ -65,14 +65,17 @@ After setup, every Copilot CLI agent automatically gets:
 | `myelin_log` | Log structured events (decision, finding, error, etc.) |
 | `myelin_show` | Inspect a node and its connections |
 | `myelin_stats` | Graph statistics and embedding coverage |
+| `myelin_sleep` | LLM-driven memory consolidation (prepare → ingest → complete) |
 
-**3 lifecycle hooks** (automatic, no agent action needed):
+**3 lifecycle events** (automatic, no agent action needed):
 
-| Hook | What it does |
+| Event | What it does |
 |------|-------------|
-| `onSessionStart` | Auto-detects agent (via `COPILOT_AGENT` env var), injects graph context + tool guidance |
-| `onSessionEnd` | Logs session summary automatically |
-| `onErrorOccurred` | Retries on recoverable model errors |
+| `user.message` (one-shot) | Auto-detects agent (via `COPILOT_AGENT` env var), injects graph context + tool guidance |
+| `session.task_complete` | Logs task summary to agent's knowledge log automatically |
+| `session.shutdown` | Logs session end as fallback if task_complete wasn't called |
+
+> **Note:** Myelin v0.10.5+ uses `session.on()` event listeners instead of extension hooks. This bypasses a [Copilot CLI bug](https://github.com/github/copilot-cli/issues/2076) where multiple extensions' hooks overwrite each other. The `onErrorOccurred` hook is retained for model error retry (requires a return value).
 
 ## Quick Start
 
@@ -181,7 +184,7 @@ Test files live in `tests/` mirroring `src/` structure. Use Vitest with in-memor
 
 ## Design Principles
 
-See [NORTH-STAR.md](NORTH-STAR.md) for the full architecture philosophy. Key principles:
+See [NORTH-STAR.md](NORTH-STAR.md) for the full architecture philosophy. See [architecture diagram](docs/architecture.drawio.svg) for a visual overview. Key principles:
 
 1. **Brain-faithful** — every subsystem maps to a neuroscience concept
 2. **Local-first** — works offline, no cloud APIs required

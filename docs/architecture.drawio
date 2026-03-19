@@ -1,0 +1,125 @@
+<mxGraphModel dx="1200" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1100" pageHeight="850" math="0" shadow="0">
+  <root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+
+    <mxCell id="title" value="Myelin Architecture" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;fontSize=20;fontStyle=1;fontColor=#333333;" vertex="1" parent="1">
+      <mxGeometry x="420" y="10" width="220" height="40" as="geometry"/>
+    </mxCell>
+    <mxCell id="subtitle" value="Knowledge Graph Memory System for AI Agents" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;fontSize=12;fontColor=#666666;fontStyle=2;" vertex="1" parent="1">
+      <mxGeometry x="350" y="42" width="360" height="30" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="src_label" value="DATA SOURCES" style="text;html=1;align=left;verticalAlign=middle;fontSize=10;fontStyle=1;fontColor=#b85400;" vertex="1" parent="1">
+      <mxGeometry x="60" y="90" width="100" height="20" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="src1" value="&lt;b&gt;Code Repos&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;10 languages&lt;br&gt;(C#, TS, Python, Go...)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+      <mxGeometry x="170" y="80" width="200" height="70" as="geometry"/>
+    </mxCell>
+    <mxCell id="src2" value="&lt;b&gt;Text Documents&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;Markdown, notes,&lt;br&gt;meeting recaps&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+      <mxGeometry x="430" y="80" width="200" height="70" as="geometry"/>
+    </mxCell>
+    <mxCell id="src3" value="&lt;b&gt;Agent Logs&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;JSONL structured events&lt;br&gt;per agent&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+      <mxGeometry x="690" y="80" width="200" height="70" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="e_s1_p1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#999999;" edge="1" source="src1" target="pipe1" parent="1">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e_s2_p2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#999999;" edge="1" source="src2" target="pipe2" parent="1">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e_s3_p3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#999999;" edge="1" source="src3" target="pipe3" parent="1">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="pipe_label" value="PROCESSING PIPELINES" style="text;html=1;align=left;verticalAlign=middle;fontSize=10;fontStyle=1;fontColor=#0050a0;" vertex="1" parent="1">
+      <mxGeometry x="60" y="200" width="150" height="20" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="pipe1" value="&lt;b&gt;myelin parse&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;Tree-sitter AST parsing&lt;br&gt;Classes, methods, interfaces&lt;br&gt;Inheritance &amp;amp; containment edges&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+      <mxGeometry x="160" y="190" width="220" height="80" as="geometry"/>
+    </mxCell>
+    <mxCell id="pipe2" value="&lt;b&gt;myelin ingest&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;Entity extraction&lt;br&gt;People, tools, decisions&lt;br&gt;Co-occurrence edges&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+      <mxGeometry x="420" y="190" width="220" height="80" as="geometry"/>
+    </mxCell>
+    <mxCell id="pipe3" value="&lt;b&gt;myelin sleep&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;LLM-driven extraction&lt;br&gt;NREM: Extract &amp;amp; score&lt;br&gt;REM: Decay &amp;amp; prune&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+      <mxGeometry x="680" y="190" width="220" height="80" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="e_p1_g" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#999999;" edge="1" source="pipe1" target="graph" parent="1">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e_p2_g" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#999999;" edge="1" source="pipe2" target="graph" parent="1">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e_p3_g" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#999999;" edge="1" source="pipe3" target="graph" parent="1">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="graph_label" value="KNOWLEDGE GRAPH" style="text;html=1;align=left;verticalAlign=middle;fontSize=10;fontStyle=1;fontColor=#2d6e0f;" vertex="1" parent="1">
+      <mxGeometry x="60" y="340" width="120" height="20" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="graph" value="" style="swimlane;html=1;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;rounded=1;arcSize=8;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+      <mxGeometry x="200" y="330" width="660" height="170" as="geometry"/>
+    </mxCell>
+    <mxCell id="graph_title" value="&lt;b style=&quot;font-size:13px&quot;&gt;Knowledge Graph&lt;/b&gt;  &lt;font style=&quot;font-size:10px;color:#666&quot;&gt;SQLite + FTS5 + sqlite-vec&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;" vertex="1" parent="graph">
+      <mxGeometry x="130" y="0" width="400" height="30" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="g_nodes" value="&lt;b&gt;Typed Nodes&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Person, Tool, Decision,&lt;br&gt;Pattern, Bug, Initiative,&lt;br&gt;Class, Method, Interface...&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#82b366;" vertex="1" parent="graph">
+      <mxGeometry x="20" y="40" width="150" height="80" as="geometry"/>
+    </mxCell>
+    <mxCell id="g_edges" value="&lt;b&gt;Weighted Edges&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;RelatesTo, DependsOn,&lt;br&gt;Supersedes, LearnedFrom,&lt;br&gt;BelongsTo, EvolvedInto...&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#82b366;" vertex="1" parent="graph">
+      <mxGeometry x="190" y="40" width="150" height="80" as="geometry"/>
+    </mxCell>
+    <mxCell id="g_search" value="&lt;b&gt;Search&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;FTS5 keyword (primary)&lt;br&gt;sqlite-vec KNN (optional)&lt;br&gt;Hybrid merge + dedup&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#82b366;" vertex="1" parent="graph">
+      <mxGeometry x="360" y="40" width="140" height="80" as="geometry"/>
+    </mxCell>
+    <mxCell id="g_salience" value="&lt;b&gt;Salience&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Dual-signal scoring&lt;br&gt;Temporal decay curve&lt;br&gt;Reinforcement &amp;gt; duplication&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#82b366;" vertex="1" parent="graph">
+      <mxGeometry x="520" y="40" width="120" height="80" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="ext_label" value="COPILOT CLI EXTENSION" style="text;html=1;align=left;verticalAlign=middle;fontSize=10;fontStyle=1;fontColor=#7a3e9d;" vertex="1" parent="1">
+      <mxGeometry x="60" y="560" width="160" height="20" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="ext" value="" style="swimlane;html=1;startSize=30;fillColor=#e1d5e7;strokeColor=#9673a6;rounded=1;arcSize=8;" vertex="1" parent="1">
+      <mxGeometry x="200" y="550" width="660" height="130" as="geometry"/>
+    </mxCell>
+    <mxCell id="ext_title" value="&lt;b style=&quot;font-size:13px&quot;&gt;Copilot CLI Extension&lt;/b&gt;  &lt;font style=&quot;font-size:10px;color:#666&quot;&gt;In-process ESM bundle (extension.mjs)&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;" vertex="1" parent="ext">
+      <mxGeometry x="100" y="0" width="460" height="30" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="ext_tools" value="&lt;b&gt;6 Tools&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;myelin_query, myelin_boot,&lt;br&gt;myelin_log, myelin_show,&lt;br&gt;myelin_stats, myelin_sleep&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#9673a6;" vertex="1" parent="ext">
+      <mxGeometry x="20" y="38" width="180" height="80" as="geometry"/>
+    </mxCell>
+    <mxCell id="ext_events" value="&lt;b&gt;3 Session Events&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;user.message (boot inject)&lt;br&gt;session.task_complete (auto-log)&lt;br&gt;session.shutdown (end fallback)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#9673a6;" vertex="1" parent="ext">
+      <mxGeometry x="220" y="38" width="200" height="80" as="geometry"/>
+    </mxCell>
+    <mxCell id="ext_cli" value="&lt;b&gt;CLI Commands&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;parse, ingest, sleep,&lt;br&gt;query, show, stats,&lt;br&gt;doctor, embed, pin...&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#9673a6;" vertex="1" parent="ext">
+      <mxGeometry x="440" y="38" width="200" height="80" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="e_g_tools" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#999999;" edge="1" source="graph" target="ext" parent="1">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="agent_box" value="&lt;b&gt;Agent Session Loop&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;1. Boot: graph context injected&lt;br&gt;2. Work: tools query/log to graph&lt;br&gt;3. End: summary auto-logged&lt;br&gt;4. Sleep: logs consolidated to graph&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;dashPattern=5 5;" vertex="1" parent="1">
+      <mxGeometry x="900" y="220" width="190" height="100" as="geometry"/>
+    </mxCell>
+    <mxCell id="e_agent_graph" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#b85450;dashed=1;exitX=0;exitY=0.5;entryX=1;entryY=0.3;" edge="1" source="agent_box" target="graph" parent="1">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="e_agent_ext" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#b85450;dashed=1;exitX=0;exitY=1;entryX=1;entryY=0.3;" edge="1" source="agent_box" target="ext" parent="1">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+
+    <mxCell id="neuro" value="&lt;font style=&quot;font-size:9px;color:#888&quot;&gt;&lt;i&gt;Brain-inspired: NREM replay extracts knowledge, REM decay prunes stale memories, salience = 0.7 x importance + 0.3 x novelty&lt;/i&gt;&lt;/font&gt;" style="text;html=1;align=center;verticalAlign=middle;rounded=0;" vertex="1" parent="1">
+      <mxGeometry x="330" y="710" width="400" height="40" as="geometry"/>
+    </mxCell>
+
+  </root>
+</mxGraphModel>

@@ -20,6 +20,7 @@
     "dist/",
     "scripts/",
     "skills/",
+    "CHANGELOG.md",
     "INSTALL.md",
     "UPGRADE.md",
     "README.md",

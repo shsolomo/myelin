@@ -62,6 +62,61 @@ myelin doctor       # check everything is healthy
 
 ## Version History
 
+### v0.10.6 — Hook Migration to Session Events
+
+**Upgrade action:** `myelin update` — restart Copilot CLI after upgrade.
+
+**What changed:**
+
+- **All lifecycle hooks migrated to `session.on()` events** — Boot context injection, session-end logging, and task-complete logging now use the per-connection event listener API (`session.on("user.message")`, `session.on("session.task_complete")`, `session.on("session.shutdown")`). This bypasses the CLI v1.0.8 hook overwrite bug where multiple extensions' hooks silently clobber each other.
+- **`onErrorOccurred` hook retained** — Error retry requires a return value, which the event listener API doesn't support. This hook stays as best-effort retry for recoverable model errors.
+- **Hooks still defined as diagnostic stubs** — All hooks log to `myelin-hook-diagnostic.log` for troubleshooting but no longer perform real work (except error retry).
+
+**Breaking changes:** None. Extension behavior is identical — the implementation mechanism changed, not the user-facing behavior.
+
+**Workaround for:** [github/copilot-cli#2076](https://github.com/github/copilot-cli/issues/2076) — `updateOptions()` replaces `this.hooks` entirely instead of merging, so the last extension to resume wins all hooks.
+
+---
+
+### v0.10.5 — Boot Context via session.on()
+
+**Upgrade action:** `myelin update` — restart Copilot CLI after upgrade.
+
+**What changed:**
+
+- **Boot context injection moved to `session.on("user.message")`** — Eagerly builds context at module load time, then injects via `session.send()` on the first user message. This is a one-shot listener that unsubscribes immediately after firing.
+- **Diagnostic hook logging** — `onSessionStart` hook still fires but only writes to the diagnostic log, confirming hook execution without depending on it.
+
+**Breaking changes:** None.
+
+---
+
+### v0.10.4 — Fix onSessionStart Silent Crash
+
+**Upgrade action:** `myelin update` — restart Copilot CLI after upgrade.
+
+**What changed:**
+
+- **Fixed `session` undefined during `joinSession` hook** — The `onSessionStart` hook was crashing silently because the `session` variable was used before `joinSession` resolved. Boot context and tool registration now work reliably.
+- **ESM import for Copilot SDK** — Switched from `require()` to ESM `import` for `@github/copilot-sdk`, fixing module resolution in the bundled extension.
+- **Boot context refactored** — Extracted `buildBootContext()` function with self-healing diagnostics and graceful fallback on partial failures.
+
+**Breaking changes:** None.
+
+---
+
+### v0.10.3 — Fix Agent Detection in onSessionStart
+
+**Upgrade action:** `myelin update` — restart Copilot CLI after upgrade.
+
+**What changed:**
+
+- **`resolveAgent()` now checks `COPILOT_AGENT` env var** — Agent detection in `onSessionStart` was failing because it only checked tool call patterns (unavailable at session start). Now checks the environment variable first.
+
+**Breaking changes:** None.
+
+---
+
 ### v0.10.2 — Distribution & Multi-Agent Install
 
 **Upgrade action:**
