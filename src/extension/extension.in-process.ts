@@ -5,9 +5,9 @@
  * It imports myelin's graph library directly — no subprocess spawning.
  *
  * Tools: myelin_query, myelin_boot, myelin_log, myelin_show, myelin_stats, myelin_sleep
- * Hooks: Diagnostic-only (CLI v1.0.8 #2076 overwrites them in multi-extension setups)
- * Events: session.on("user.message") for boot, session.on("session.task_complete") for
- *         auto-logging, session.on("session.shutdown") for session-end fallback
+ * Hooks: onSessionStart returns { additionalContext } for boot context injection (CLI ≥v1.0.11)
+ * Events: session.on("session.task_complete") for auto-logging,
+ *         session.on("session.shutdown") for session-end fallback
  */
 
 import { homedir } from "node:os";
@@ -36,11 +36,7 @@ function hookLog(msg: string) {
 // Session-level agent identity — set when myelin_boot is called
 let sessionAgent: string | null = null;
 let taskCompleteLogged = false;
-// Build boot context eagerly at module load time.
-// CLI v1.0.8 has a bug where multiple extensions with hooks overwrite each other
-// (last extension to resume wins — updateOptions does this.hooks = e.hooks, not merge).
-// So hooks are unreliable. Instead, we inject context via session.send() on first
-// user.message event, which uses the event listener API and is not affected by the bug.
+// Build boot context eagerly at module load time for injection via onSessionStart hook.
 let eagerBootContext: string | null = null;
 try {
   eagerBootContext = buildBootContext();
@@ -169,7 +165,17 @@ const session = await joinSession({
   onPermissionRequest: approveAll,
 
   hooks: {
-    onSessionStart: async () => { hookLog(`onSessionStart fired — v${MYELIN_VERSION}`); },
+    onSessionStart: async () => {
+      hookLog(`onSessionStart fired — v${MYELIN_VERSION}`);
+      if (eagerBootContext) {
+        const ctx = eagerBootContext;
+        eagerBootContext = null; // One-shot — don't re-inject on resume
+        hookLog(`onSessionStart returning additionalContext (${ctx.length} chars)`);
+        return {
+          additionalContext: `<myelin_boot_context>\n${ctx}\n</myelin_boot_context>\n\nContinue with the user's request. The above is injected context from myelin's knowledge graph — do not repeat it to the user.`,
+        };
+      }
+    },
     onUserPromptSubmitted: async () => {},
     onSessionEnd: async () => { hookLog('onSessionEnd fired'); },
     onPostToolUse: async () => { hookLog('onPostToolUse fired'); },
@@ -496,24 +502,7 @@ const session = await joinSession({
   ],
 });
 
-// Inject boot context via session.send() on first user message.
-// This bypasses the CLI hook overwrite bug where only the last
-// extension's hooks survive (github/copilot-cli#2142).
-if (eagerBootContext) {
-  const bootContext = eagerBootContext;
-  eagerBootContext = null;
-
-  const unsub = session.on("user.message", () => {
-    unsub(); // One-shot — unsubscribe immediately
-    hookLog(`session.on("user.message") injecting boot context (${bootContext.length} chars)`);
-    session.send({
-      prompt: `<myelin_boot_context>\n${bootContext}\n</myelin_boot_context>\n\nContinue with the user's request. The above is injected context from myelin's knowledge graph — do not repeat it to the user.`,
-    });
-  });
-}
-
 // Auto-log task_complete summaries via event listener.
-// Bypasses CLI hook overwrite bug — session.on() is per-connection.
 session.on("session.task_complete", (event: any) => {
   if (taskCompleteLogged) return;
   taskCompleteLogged = true;
