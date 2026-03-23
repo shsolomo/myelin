@@ -721,16 +721,30 @@ async function processChunk(
   chunkText: string,
   promptTemplate: string,
   index: number,
-  timeoutMs = 90_000,
+  timeoutMs = 120_000,
 ): Promise<ChunkResult> {
   const prompt = `${promptTemplate}\n\nTEXT:\n${chunkText}\n\nReturn ONLY valid JSON, no explanation.`;
   const start = Date.now();
+  const promptFile = join(tmpdir(), `myelin-sleep-${process.pid}-${index}.txt`);
+
+  const cleanup = () => {
+    try { unlinkSync(promptFile); } catch {}
+  };
 
   return new Promise((resolve) => {
-    const proc = spawn('copilot', ['-p', prompt, '--disable-builtin-mcps'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      // No shell: true — pass args directly to avoid shell quoting issues
-    });
+    writeFileSync(promptFile, prompt, 'utf-8');
+
+    const isWindows = process.platform === 'win32';
+    const cmd = isWindows
+      ? `copilot -p (Get-Content -Raw '${promptFile}') --disable-builtin-mcps`
+      : `copilot -p "$(cat '${promptFile}')" --disable-builtin-mcps`;
+    const proc = isWindows
+      ? spawn('pwsh.exe', ['-NoProfile', '-NoLogo', '-Command', cmd], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      : spawn('/bin/sh', ['-c', cmd], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
 
     let stdout = '';
     let stderr = '';
@@ -743,11 +757,13 @@ async function processChunk(
 
     const timer = setTimeout(() => {
       proc.kill();
+      cleanup();
       resolve({ json: null, error: 'timeout', durationMs: Date.now() - start });
     }, timeoutMs);
 
     proc.on('close', (code) => {
       clearTimeout(timer);
+      cleanup();
       const durationMs = Date.now() - start;
       if (code !== 0) {
         resolve({ json: null, error: `exit code ${code}`, durationMs });
@@ -770,6 +786,7 @@ async function processChunk(
 
     proc.on('error', (err) => {
       clearTimeout(timer);
+      cleanup();
       resolve({ json: null, error: err.message, durationMs: Date.now() - start });
     });
   });
@@ -779,6 +796,7 @@ async function sleepAgent(
   agentName: string,
   graphDbPath: string | undefined,
   parallel: number,
+  chunkTimeoutMs = 120_000,
 ): Promise<{ entities: number; relationships: number; errors: number }> {
   const result = prepareSleep(agentName, { dbPath: graphDbPath });
   if (result.totalEntries === 0) {
@@ -800,7 +818,7 @@ async function sleepAgent(
     for (let i = 0; i < result.chunks.length; i += parallel) {
       const batch = result.chunks.slice(i, i + parallel);
       const promises = batch.map((chunk, j) =>
-        processChunk(chunk.text, result.extractionPrompt, i + j),
+        processChunk(chunk.text, result.extractionPrompt, i + j, chunkTimeoutMs),
       );
       const results = await Promise.all(promises);
 
@@ -833,15 +851,19 @@ async function sleepAgent(
       }
     }
 
-    // Find latest timestamp from the chunks
-    const allEntries = result.chunks.reduce((sum, c) => sum + c.entryCount, 0);
-    // Use current time as watermark since we processed everything prepareSleep returned
-    latestTs = new Date().toISOString();
-    setWatermark(graph, agentName, latestTs, allEntries);
-
-    console.log(
-      `  ✅ ${agentName}: ${totalEntities} entities, ${totalRelationships} relationships added. Watermark: ${latestTs.slice(0, 19)}Z`,
-    );
+    const successCount = result.chunks.length - totalErrors;
+    if (successCount > 0) {
+      const allEntries = result.chunks.reduce((sum, c) => sum + c.entryCount, 0);
+      latestTs = new Date().toISOString();
+      setWatermark(graph, agentName, latestTs, allEntries);
+      console.log(
+        `  ✅ ${agentName}: ${totalEntities} entities, ${totalRelationships} relationships added. Watermark: ${latestTs.slice(0, 19)}Z`,
+      );
+    } else {
+      console.log(
+        chalk.red(`  ❌ ${agentName}: all ${totalErrors} chunks failed — watermark NOT advanced. Will retry next run.`),
+      );
+    }
   } finally {
     graph.close();
   }
@@ -856,6 +878,7 @@ program
   .option('--all', 'Process all agents with logs')
   .option('--status', 'Show sleep status per agent')
   .option('--parallel <n>', 'Max parallel extractions', '2')
+  .option('--chunk-timeout <seconds>', 'Timeout per chunk in seconds', '120')
   .option('--decay-rate <rate>', 'Decay rate for REM phase', '0.05')
   .option('--embed', 'Run embedding after sleep')
   .option('--db <path>', 'Path to graph.db')
@@ -864,11 +887,13 @@ program
     all?: boolean;
     status?: boolean;
     parallel: string;
+    chunkTimeout: string;
     decayRate: string;
     embed?: boolean;
     db?: string;
   }) => {
     const parallel = Math.max(1, parseInt(opts.parallel) || 2);
+    const chunkTimeout = Math.max(30, parseInt(opts.chunkTimeout) || 120) * 1000;
     const graphDbPath = opts.db;
 
     // --status: show watermark + pending entries per agent
@@ -919,7 +944,7 @@ program
     let grandRelationships = 0;
     let grandErrors = 0;
     for (const agent of agents) {
-      const r = await sleepAgent(agent, graphDbPath, parallel);
+      const r = await sleepAgent(agent, graphDbPath, parallel, chunkTimeout);
       grandEntities += r.entities;
       grandRelationships += r.relationships;
       grandErrors += r.errors;
