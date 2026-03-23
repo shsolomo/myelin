@@ -61,17 +61,26 @@ function buildBootContext(): string | null {
     sessionAgent = detectedAgent;
   }
 
-  const contextParts: string[] = [];
+  const sections: string[] = [];
 
-  // Graph briefing
+  // Section 1: Graph nodes (only emit if there's content)
   try {
     const briefing = getBootContext(detectedAgent, { dbPath: DB_PATH });
-    if (briefing) contextParts.push(briefing);
+    if (briefing) {
+      sections.push(
+        `<myelin_graph_nodes>`,
+        `<!-- Consolidated knowledge from the graph — entities and relationships`,
+        `     that survived NREM extraction and REM decay. These represent durable`,
+        `     long-term memory from previous sessions. -->`,
+        briefing,
+        `</myelin_graph_nodes>`
+      );
+    }
   } catch (bootErr: any) {
     hookLog(`buildBootContext: graph boot failed: ${bootErr.message}`);
   }
 
-  // Unconsolidated agent activity logs
+  // Section 2: Recent logs (only emit if there are entries)
   if (detectedAgent) {
     try {
       let watermark: string | null = null;
@@ -90,7 +99,10 @@ function buildBootContext(): string | null {
       });
       if (recentLogs.length > 0) {
         const logLines: string[] = [
-          "",
+          `<myelin_recent_logs>`,
+          `<!-- Unconsolidated activity from recent sessions. Raw agent observations`,
+          `     that have NOT been through sleep yet — today's working memory.`,
+          `     These will become graph nodes after the next consolidation cycle. -->`,
           `## Recent Activity — ${detectedAgent}`,
           watermark
             ? `_${recentLogs.length} unconsolidated entries (since ${watermark.slice(0, 16)}Z) — older activity is in the graph_`
@@ -104,16 +116,17 @@ function buildBootContext(): string | null {
           const summary = entry.summary.slice(0, 80);
           logLines.push(`| ${time} | ${entry.type} | ${summary} |`);
         }
-        contextParts.push(logLines.join("\n"));
+        logLines.push(`</myelin_recent_logs>`);
+        sections.push(logLines.join("\n"));
       }
     } catch {
       // Silent — don't break boot for log read failure
     }
   }
 
-  // Tool guidance
-  contextParts.push(
-    "",
+  // Section 3: Tool guidance + health hints (always emit)
+  const guidanceParts: string[] = [
+    `<myelin_tool_guidance>`,
     "## Myelin — When to Use These Tools",
     "",
     "You have a persistent knowledge graph with extracted entities, relationships, and agent history.",
@@ -135,19 +148,19 @@ function buildBootContext(): string | null {
     "- **myelin_log** — Record important decisions, findings, errors, and observations. These feed future sleep cycles into the graph.",
     "- **myelin_show** — Inspect a specific node and its connections. Use after finding a node via query to explore its edges.",
     "- **myelin_stats** — Check graph health: node/edge counts, type distribution, embedding coverage.",
-  );
+  ];
 
-  // Health hints
+  // Health hints go inside tool guidance — they're instructions, not knowledge
   const healthGraph = getGraph();
   if (healthGraph) {
     try {
       const healthStats = healthGraph.stats();
       if (healthStats.nodeCount === 0) {
-        contextParts.push("", "💡 Graph is empty — run `myelin parse ./your-repo` to index code");
+        guidanceParts.push("", "💡 Graph is empty — run `myelin parse ./your-repo` to index code");
       } else {
         const embStats = healthGraph.embeddingStats();
         if (!embStats.vecAvailable || embStats.embeddedNodes === 0) {
-          contextParts.push("", "ℹ️ Search uses FTS5 keywords. Run `myelin embed` to add optional semantic boost.");
+          guidanceParts.push("", "ℹ️ Search uses FTS5 keywords. Run `myelin embed` to add optional semantic boost.");
         }
       }
     } catch {
@@ -157,7 +170,10 @@ function buildBootContext(): string | null {
     }
   }
 
-  return contextParts.length > 0 ? contextParts.join("\n") : null;
+  guidanceParts.push(`</myelin_tool_guidance>`);
+  sections.push(guidanceParts.join("\n"));
+
+  return sections.length > 0 ? sections.join("\n\n") : null;
 }
 
 
@@ -172,7 +188,7 @@ const session = await joinSession({
         eagerBootContext = null; // One-shot — don't re-inject on resume
         hookLog(`onSessionStart returning additionalContext (${ctx.length} chars)`);
         return {
-          additionalContext: `<myelin_boot_context>\n${ctx}\n</myelin_boot_context>\n\nContinue with the user's request. The above is injected context from myelin's knowledge graph — do not repeat it to the user.`,
+          additionalContext: `${ctx}\n\nThe above sections were injected by the myelin memory extension. <myelin_graph_nodes> contains consolidated long-term knowledge. <myelin_recent_logs> contains today's unconsolidated activity. Do not repeat this context to the user unless asked.`,
         };
       }
     },
