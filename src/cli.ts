@@ -15,6 +15,7 @@ import Database from 'better-sqlite3';
 
 import { KnowledgeGraph, NodeType, RelationshipType } from './memory/graph.js';
 import { initSchema, extendSchemaForCode } from './memory/schema.js';
+import { buildSpawnCommand } from './sleep-utils.js';
 import {
   getBootContext,
   generatePersonaDiff,
@@ -734,17 +735,10 @@ async function processChunk(
   return new Promise((resolve) => {
     writeFileSync(promptFile, prompt, 'utf-8');
 
-    const isWindows = process.platform === 'win32';
-    const cmd = isWindows
-      ? `copilot -p (Get-Content -Raw '${promptFile}') --disable-builtin-mcps`
-      : `copilot -p "$(cat '${promptFile}')" --disable-builtin-mcps`;
-    const proc = isWindows
-      ? spawn('pwsh.exe', ['-NoProfile', '-NoLogo', '-Command', cmd], {
-          stdio: ['ignore', 'pipe', 'pipe'],
-        })
-      : spawn('/bin/sh', ['-c', cmd], {
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
+    const { command, args } = buildSpawnCommand(process.platform, promptFile);
+    const proc = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
 
     let stdout = '';
     let stderr = '';
