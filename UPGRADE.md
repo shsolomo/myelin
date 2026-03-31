@@ -318,4 +318,4 @@ myelin sleep
 ```
 
 ### Node.js version
-Myelin requires Node.js >= 20. Version 22+ is recommended. Native addons (better-sqlite3, tree-sitter) recompile during install for your Node version. If you upgrade Node, re-run `myelin setup-extension` to recompile.
+Myelin requires Node.js 24 (25+ is not yet supported). Native addons (better-sqlite3, tree-sitter) recompile during install for your Node version. If you upgrade Node, re-run `myelin setup-extension` to recompile.

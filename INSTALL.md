@@ -2,7 +2,7 @@
 
 Myelin gives your Copilot CLI agents persistent, searchable memory across sessions. Install it once, and every agent automatically gets graph-backed tools, context injection, and session logging — no configuration required.
 
-**What you need:** Node.js >= 20 (22+ recommended) and `gh` CLI authenticated. That's it for the package install. The npm path also requires a C++ toolchain for native modules.
+**What you need:** Node.js 24 and `gh` CLI authenticated. That's it for the package install. The npm path also requires a C++ toolchain for native modules. Node.js 25+ is not yet supported.
 
 ---
 
@@ -103,7 +103,7 @@ This method installs myelin globally and sets up the extension at user level (`~
 npm install -g github:shsolomo/myelin
 ```
 
-Requires Node.js >= 20 (22+ recommended). Native addons (better-sqlite3, sqlite-vec) compile during install — a C++ toolchain is required (Visual Studio Build Tools on Windows, Xcode on macOS, `build-essential` on Linux).
+Requires Node.js 24 (25+ is not yet supported). Native addons (better-sqlite3, sqlite-vec) compile during install — a C++ toolchain is required (Visual Studio Build Tools on Windows, Xcode on macOS, `build-essential` on Linux).
 
 > **Tip:** Add `--legacy-peer-deps` if you see peer dependency conflicts with tree-sitter-bicep.
 

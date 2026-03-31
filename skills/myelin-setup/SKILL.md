@@ -26,7 +26,7 @@ This skill works without any pre-existing configuration. During setup, it create
    ```bash
    npm install -g github:shsolomo/myelin
    ```
-   Requires Node.js >= 20. Native addons (better-sqlite3, sqlite-vec) compile during install — a C++ toolchain is required (Visual Studio Build Tools on Windows, Xcode on macOS, `build-essential` on Linux).
+   Requires Node.js 24 (25+ is not yet supported). Native addons (better-sqlite3, sqlite-vec) compile during install — a C++ toolchain is required (Visual Studio Build Tools on Windows, Xcode on macOS, `build-essential` on Linux).
 
 3. Set up the Copilot CLI extension (also initializes the graph database and downloads models):
    ```bash
