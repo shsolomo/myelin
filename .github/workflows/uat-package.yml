@@ -1,7 +1,7 @@
 name: Package Install UAT
 
-# Runs after CI completes — the sync-genesis job in ci.yml must publish
-# the package to .github/package/myelin/ before these tests can download it.
+# Runs after CI completes — the sync-genesis job in ci.yml publishes
+# the package to .github/package/myelin/ before this workflow triggers.
 on:
   workflow_run:
     workflows: ["CI"]
@@ -14,24 +14,24 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
 
       - name: Simulate package install
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Create extension directory
           EXT_DIR="$HOME/.copilot/extensions/myelin"
           mkdir -p "$EXT_DIR"
 
-          # Download extension.mjs and package.json directly from the known path
-          gh api repos/shsolomo/myelin/contents/.github/package/myelin/extension.mjs --jq '.content' | base64 -d > "$EXT_DIR/extension.mjs"
-          gh api repos/shsolomo/myelin/contents/.github/package/myelin/package.json --jq '.content' | base64 -d > "$EXT_DIR/package.json"
+          # Copy genesis package files (simulates downloading from repo)
+          cp .github/package/myelin/extension.mjs "$EXT_DIR/"
+          cp .github/package/myelin/package.json "$EXT_DIR/"
 
-          # Install native deps
+          # Install runtime deps
           cd "$EXT_DIR" && npm install --omit=dev
 
           # Verify extension exists
