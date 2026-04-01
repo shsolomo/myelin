@@ -35,7 +35,6 @@
     "test:watch": "vitest",
     "lint": "eslint src/",
     "clean": "rimraf dist",
-    "postinstall": "node scripts/postinstall.mjs",
     "prepublishOnly": "npm run build && npm run bundle-extension"
   },
   "keywords": [
@@ -54,19 +53,13 @@
     "node": ">=24.0.0 <25.0.0"
   },
   "dependencies": {
+    "@vscode/tree-sitter-wasm": "^0.3.0",
     "better-sqlite3": "^12.6.2",
     "chalk": "^5.4.0",
     "cli-table3": "^0.6.5",
     "commander": "^13.0.0",
     "sqlite-vec": "^0.1.6",
-    "tree-sitter": "^0.25.0",
-    "tree-sitter-bicep": "^1.1.0",
-    "tree-sitter-c-sharp": "^0.23.1",
-    "tree-sitter-go": "^0.25.0",
-    "tree-sitter-json": "^0.24.8",
-    "tree-sitter-powershell": "^0.26.3",
-    "tree-sitter-python": "^0.25.0",
-    "tree-sitter-typescript": "^0.23.2"
+    "web-tree-sitter": "^0.26.8"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
@@ -75,10 +68,5 @@
     "rimraf": "^6.0.0",
     "typescript": "^5.9.3",
     "vitest": "^3.0.0"
-  },
-  "peerDependenciesMeta": {
-    "tree-sitter": {
-      "optional": true
-    }
   }
 }

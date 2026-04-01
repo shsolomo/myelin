@@ -1,38 +1,34 @@
 /**
- * Go parser using tree-sitter.
+ * Go parser using web-tree-sitter (WASM).
  * Ported from cortex/code/parsers/go_parser.py
  */
 
-import Parser from 'tree-sitter';
-import Go from 'tree-sitter-go';
 import type { ParsedEdge, ParsedEntity, ParsedFile } from '../models.js';
 import { makeEntity, makeEdge, makeParsedFile } from '../models.js';
 import { BaseParser } from './base.js';
+import { createParser } from './wasm-init.js';
+import type { Parser, SyntaxNode } from './wasm-init.js';
 
-function getParser(): Parser {
-  const parser = new Parser();
-  parser.setLanguage(Go as unknown as Parser.Language);
-  return parser;
-}
+let cachedParser: Parser | null = null;
 
-function nodeText(node: Parser.SyntaxNode, source: Buffer): string {
+function nodeText(node: SyntaxNode, source: Buffer): string {
   return source.subarray(node.startIndex, node.endIndex).toString('utf-8');
 }
 
-function findChildren(node: Parser.SyntaxNode, typeName: string): Parser.SyntaxNode[] {
-  return node.children.filter((c) => c.type === typeName);
+function findChildren(node: SyntaxNode, typeName: string): SyntaxNode[] {
+  return node.children.filter((c: SyntaxNode) => c.type === typeName);
 }
 
-function findChild(node: Parser.SyntaxNode, typeName: string): Parser.SyntaxNode | null {
-  return node.children.find((c) => c.type === typeName) ?? null;
+function findChild(node: SyntaxNode, typeName: string): SyntaxNode | null {
+  return node.children.find((c: SyntaxNode) => c.type === typeName) ?? null;
 }
 
-function getName(node: Parser.SyntaxNode, source: Buffer): string {
+function getName(node: SyntaxNode, source: Buffer): string {
   const nameNode = findChild(node, 'identifier') ?? findChild(node, 'field_identifier');
   return nameNode ? nodeText(nameNode, source) : '';
 }
 
-function extractPackage(root: Parser.SyntaxNode, source: Buffer): string {
+function extractPackage(root: SyntaxNode, source: Buffer): string {
   for (const child of root.children) {
     if (child.type === 'package_clause') {
       const nameNode = findChild(child, 'package_identifier') ?? findChild(child, 'identifier');
@@ -42,7 +38,7 @@ function extractPackage(root: Parser.SyntaxNode, source: Buffer): string {
   return '';
 }
 
-function extractImports(root: Parser.SyntaxNode, source: Buffer): string[] {
+function extractImports(root: SyntaxNode, source: Buffer): string[] {
   const imports: string[] = [];
   for (const child of root.children) {
     if (child.type === 'import_declaration') {
@@ -69,7 +65,7 @@ function extractImports(root: Parser.SyntaxNode, source: Buffer): string[] {
   return imports;
 }
 
-function getMethodReceiverType(node: Parser.SyntaxNode, source: Buffer): string {
+function getMethodReceiverType(node: SyntaxNode, source: Buffer): string {
   const paramList = findChild(node, 'parameter_list');
   if (paramList) {
     for (const param of findChildren(paramList, 'parameter_declaration')) {
@@ -87,7 +83,7 @@ function getMethodReceiverType(node: Parser.SyntaxNode, source: Buffer): string 
 }
 
 function extractEntities(
-  root: Parser.SyntaxNode,
+  root: SyntaxNode,
   source: Buffer,
   pkg: string,
   filePath: string,
@@ -236,15 +232,16 @@ function buildEdges(parsed: ParsedFile): ParsedEdge[] {
 }
 
 export class GoParser extends BaseParser {
-  private parser: Parser;
-
   constructor() {
     super();
-    this.parser = getParser();
   }
 
-  parseFile(filePath: string, source: Buffer, relativePath: string): ParsedFile {
-    const tree = this.parser.parse(source.toString('utf-8'));
+  async parseFile(filePath: string, source: Buffer, relativePath: string): Promise<ParsedFile> {
+    if (!cachedParser) {
+      cachedParser = await createParser('tree-sitter-go.wasm');
+    }
+
+    const tree = cachedParser.parse(source.toString('utf-8'));
     const root = tree.rootNode;
 
     const pkg = extractPackage(root, source);

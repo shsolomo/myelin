@@ -1,35 +1,27 @@
 /**
- * TypeScript/TSX parser using tree-sitter.
+ * TypeScript/TSX parser using web-tree-sitter (WASM).
  * Ported from cortex/code/parsers/typescript.py
  */
 
-import Parser from 'tree-sitter';
-import TreeSitterTS from 'tree-sitter-typescript';
 import type { ParsedEdge, ParsedEntity, ParsedFile } from '../models.js';
 import { makeEntity, makeEdge, makeParsedFile } from '../models.js';
 import { BaseParser } from './base.js';
+import { createParser } from './wasm-init.js';
+import type { Parser, SyntaxNode } from './wasm-init.js';
 
-const { typescript: tsLang, tsx: tsxLang } = TreeSitterTS;
-
-function getParser(language: unknown): Parser {
-  const parser = new Parser();
-  parser.setLanguage(language as Parser.Language);
-  return parser;
-}
-
-function nodeText(node: Parser.SyntaxNode, source: Buffer): string {
+function nodeText(node: SyntaxNode, source: Buffer): string {
   return source.subarray(node.startIndex, node.endIndex).toString('utf-8');
 }
 
-function findChildren(node: Parser.SyntaxNode, typeName: string): Parser.SyntaxNode[] {
-  return node.children.filter((c) => c.type === typeName);
+function findChildren(node: SyntaxNode, typeName: string): SyntaxNode[] {
+  return node.children.filter((c: SyntaxNode) => c.type === typeName);
 }
 
-function findChild(node: Parser.SyntaxNode, typeName: string): Parser.SyntaxNode | null {
-  return node.children.find((c) => c.type === typeName) ?? null;
+function findChild(node: SyntaxNode, typeName: string): SyntaxNode | null {
+  return node.children.find((c: SyntaxNode) => c.type === typeName) ?? null;
 }
 
-function getName(node: Parser.SyntaxNode, source: Buffer): string {
+function getName(node: SyntaxNode, source: Buffer): string {
   const nameNode =
     findChild(node, 'identifier') ??
     findChild(node, 'type_identifier') ??
@@ -37,12 +29,12 @@ function getName(node: Parser.SyntaxNode, source: Buffer): string {
   return nameNode ? nodeText(nameNode, source) : '';
 }
 
-function getStringValue(node: Parser.SyntaxNode, source: Buffer): string {
+function getStringValue(node: SyntaxNode, source: Buffer): string {
   const text = nodeText(node, source);
   return text.replace(/^["'`]|["'`]$/g, '');
 }
 
-function extractImports(root: Parser.SyntaxNode, source: Buffer): string[] {
+function extractImports(root: SyntaxNode, source: Buffer): string[] {
   const imports: string[] = [];
   for (const child of root.children) {
     if (child.type === 'import_statement') {
@@ -62,7 +54,7 @@ function extractImports(root: Parser.SyntaxNode, source: Buffer): string[] {
   return imports;
 }
 
-function unwrapExport(node: Parser.SyntaxNode): Parser.SyntaxNode {
+function unwrapExport(node: SyntaxNode): SyntaxNode {
   if (node.type === 'export_statement') {
     for (const child of node.children) {
       if (!['export', 'default', ';', 'comment'].includes(child.type)) {
@@ -92,7 +84,7 @@ const MEMBER_DECLS: Record<string, string> = {
   property_signature: 'property',
 };
 
-function getHeritage(node: Parser.SyntaxNode, source: Buffer): string[] {
+function getHeritage(node: SyntaxNode, source: Buffer): string[] {
   const baseTypes: string[] = [];
   for (const child of node.children) {
     if (child.type === 'class_heritage') {
@@ -120,7 +112,7 @@ function getHeritage(node: Parser.SyntaxNode, source: Buffer): string[] {
 }
 
 function extractMembers(
-  body: Parser.SyntaxNode,
+  body: SyntaxNode,
   source: Buffer,
   parentFqn: string,
   filePath: string,
@@ -144,7 +136,7 @@ function extractMembers(
 }
 
 function processDeclarations(
-  root: Parser.SyntaxNode,
+  root: SyntaxNode,
   source: Buffer,
   namespace: string,
   filePath: string,
@@ -278,19 +270,36 @@ function deriveNamespace(relativePath: string): string {
   return parts.length > 1 ? parts.slice(0, -1).join('.') : '';
 }
 
+// Cached parser instances (lazy-initialized on first parseFile call)
+let tsParser: Parser | null = null;
+let tsxParser: Parser | null = null;
+
 export class TypeScriptParser extends BaseParser {
-  private parser: Parser;
+  private useTsx: boolean;
   private langName: string;
 
   constructor(useTsx = false) {
     super();
-    const lang = useTsx ? tsxLang : tsLang;
-    this.parser = getParser(lang);
+    this.useTsx = useTsx;
     this.langName = useTsx ? 'tsx' : 'typescript';
   }
 
-  parseFile(filePath: string, source: Buffer, relativePath: string): ParsedFile {
-    const tree = this.parser.parse(source.toString('utf-8'));
+  async parseFile(filePath: string, source: Buffer, relativePath: string): Promise<ParsedFile> {
+    // Lazy-init: create parser on first call, cache for reuse
+    let parser: Parser;
+    if (this.useTsx) {
+      if (!tsxParser) {
+        tsxParser = await createParser('tree-sitter-tsx.wasm');
+      }
+      parser = tsxParser;
+    } else {
+      if (!tsParser) {
+        tsParser = await createParser('tree-sitter-typescript.wasm');
+      }
+      parser = tsParser;
+    }
+
+    const tree = parser.parse(source.toString('utf-8'));
     const root = tree.rootNode;
 
     const namespace = deriveNamespace(relativePath);

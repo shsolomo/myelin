@@ -1,173 +1,130 @@
 /**
- * JSON parser using tree-sitter.
+ * JSON parser — uses JSON.parse() instead of tree-sitter.
+ *
+ * Extracts top-level keys, Grafana dashboard entities, and ARM template
+ * resources using native JSON parsing. No native compilation required.
  * Ported from cortex/code/parsers/json_parser.py
  */
 
-import Parser from 'tree-sitter';
-import Json from 'tree-sitter-json';
 import type { ParsedEdge, ParsedEntity, ParsedFile } from '../models.js';
 import { makeEntity, makeEdge, makeParsedFile } from '../models.js';
 import { BaseParser } from './base.js';
 
-function getParser(): Parser {
-  const parser = new Parser();
-  parser.setLanguage(Json as unknown as Parser.Language);
-  return parser;
-}
-
-function nodeText(node: Parser.SyntaxNode, source: Buffer): string {
-  return source.subarray(node.startIndex, node.endIndex).toString('utf-8');
-}
-
-function findChild(node: Parser.SyntaxNode, typeName: string): Parser.SyntaxNode | null {
-  return node.children.find((c) => c.type === typeName) ?? null;
-}
-
-function stringValue(node: Parser.SyntaxNode, source: Buffer): string {
-  const text = nodeText(node, source);
-  if (text.length >= 2 && text[0] === '"' && text[text.length - 1] === '"') {
-    return text.slice(1, -1);
+/**
+ * Find the 1-based line number where a key first appears in the JSON source.
+ * Falls back to 1 if not found.
+ */
+function findKeyLine(text: string, key: string): number {
+  // Search for "key": pattern
+  const pattern = `"${key}"`;
+  const idx = text.indexOf(pattern);
+  if (idx === -1) return 1;
+  // Count newlines before this index
+  let lineNum = 1;
+  for (let i = 0; i < idx; i++) {
+    if (text[i] === '\n') lineNum++;
   }
-  return text;
+  return lineNum;
 }
 
-function getRootObject(root: Parser.SyntaxNode): Parser.SyntaxNode | null {
-  for (const child of root.children) {
-    if (child.type === 'object') return child;
-    if (child.type === 'document') {
-      const obj = findChild(child, 'object');
-      if (obj) return obj;
-    }
-  }
-  return null;
+function isGrafana(obj: Record<string, unknown>): boolean {
+  return 'panels' in obj || 'dashboard' in obj || 'annotations' in obj;
 }
 
-function getTopLevelPairs(obj: Parser.SyntaxNode, source: Buffer): Array<[string, Parser.SyntaxNode]> {
-  const pairs: Array<[string, Parser.SyntaxNode]> = [];
-  for (const child of obj.children) {
-    if (child.type === 'pair') {
-      const keyNode = child.children[0] ?? null;
-      const valNode = child.children.length > 1 ? child.children[child.children.length - 1] : null;
-      if (keyNode && valNode && keyNode.type === 'string') {
-        pairs.push([stringValue(keyNode, source), valNode]);
-      }
-    }
-  }
-  return pairs;
-}
-
-function topLevelKeys(obj: Parser.SyntaxNode, source: Buffer): Set<string> {
-  return new Set(getTopLevelPairs(obj, source).map(([k]) => k));
-}
-
-function isGrafana(keys: Set<string>): boolean {
-  return keys.has('panels') || keys.has('dashboard') || keys.has('annotations');
-}
-
-function isArmTemplate(obj: Parser.SyntaxNode, source: Buffer): boolean {
-  for (const [k, v] of getTopLevelPairs(obj, source)) {
-    if (k === '$schema') {
-      const schemaText = nodeText(v, source);
-      return schemaText.includes('deploymentTemplate') || schemaText.includes('subscriptionDeploymentTemplate');
-    }
-  }
-  return false;
+function isArmTemplate(obj: Record<string, unknown>): boolean {
+  const schema = obj['$schema'];
+  if (typeof schema !== 'string') return false;
+  return schema.includes('deploymentTemplate') || schema.includes('subscriptionDeploymentTemplate');
 }
 
 function extractGrafanaEntities(
-  obj: Parser.SyntaxNode,
-  source: Buffer,
+  obj: Record<string, unknown>,
+  text: string,
   filePath: string,
   namespace: string,
 ): ParsedEntity[] {
   const entities: ParsedEntity[] = [];
-  for (const [key, valNode] of getTopLevelPairs(obj, source)) {
-    if (key === 'panels' && valNode.type === 'array') {
-      for (const item of valNode.children) {
-        if (item.type === 'object') {
-          for (const [pk, pv] of getTopLevelPairs(item, source)) {
-            if (pk === 'title') {
-              const title = pv.type === 'string' ? stringValue(pv, source) : nodeText(pv, source);
-              entities.push(makeEntity({
-                entityType: 'panel',
-                name: title,
-                fullyQualifiedName: `${namespace}/panel/${title}`,
-                filePath,
-                lineStart: item.startPosition.row + 1,
-                lineEnd: item.endPosition.row + 1,
-              }));
-            }
-          }
-        }
+
+  // Extract panels
+  const panels = obj['panels'];
+  if (Array.isArray(panels)) {
+    for (const panel of panels) {
+      if (panel && typeof panel === 'object' && 'title' in panel) {
+        const title = String((panel as Record<string, unknown>)['title']);
+        entities.push(makeEntity({
+          entityType: 'panel',
+          name: title,
+          fullyQualifiedName: `${namespace}/panel/${title}`,
+          filePath,
+          lineStart: findKeyLine(text, 'title'),
+          lineEnd: findKeyLine(text, 'title'),
+        }));
       }
-    } else if (key === 'title') {
-      const title = valNode.type === 'string' ? stringValue(valNode, source) : nodeText(valNode, source);
-      entities.push(makeEntity({
-        entityType: 'config',
-        name: title,
-        fullyQualifiedName: `${namespace}/dashboard/${title}`,
-        filePath,
-        lineStart: obj.startPosition.row + 1,
-        lineEnd: obj.endPosition.row + 1,
-      }));
     }
   }
+
+  // Extract dashboard title
+  if ('title' in obj && typeof obj['title'] === 'string') {
+    entities.push(makeEntity({
+      entityType: 'config',
+      name: obj['title'],
+      fullyQualifiedName: `${namespace}/dashboard/${obj['title']}`,
+      filePath,
+      lineStart: 1,
+      lineEnd: 1,
+    }));
+  }
+
   return entities;
 }
 
 function extractArmEntities(
-  obj: Parser.SyntaxNode,
-  source: Buffer,
+  obj: Record<string, unknown>,
+  text: string,
   filePath: string,
   namespace: string,
 ): ParsedEntity[] {
   const entities: ParsedEntity[] = [];
-  for (const [key, valNode] of getTopLevelPairs(obj, source)) {
-    if (key === 'resources' && valNode.type === 'array') {
-      for (const item of valNode.children) {
-        if (item.type === 'object') {
-          let resourceType = '';
-          let resourceName = '';
-          for (const [rk, rv] of getTopLevelPairs(item, source)) {
-            if (rk === 'type') resourceType = rv.type === 'string' ? stringValue(rv, source) : '';
-            else if (rk === 'name') resourceName = rv.type === 'string' ? stringValue(rv, source) : '';
-          }
-          if (resourceType || resourceName) {
-            const label = resourceType || resourceName;
-            entities.push(makeEntity({
-              entityType: 'resource',
-              name: label,
-              fullyQualifiedName: `${namespace}/resource/${label}`,
-              filePath,
-              lineStart: item.startPosition.row + 1,
-              lineEnd: item.endPosition.row + 1,
-            }));
-          }
-        }
-      }
+  const resources = obj['resources'];
+  if (!Array.isArray(resources)) return entities;
+
+  for (const resource of resources) {
+    if (!resource || typeof resource !== 'object') continue;
+    const r = resource as Record<string, unknown>;
+    const resourceType = typeof r['type'] === 'string' ? r['type'] : '';
+    const resourceName = typeof r['name'] === 'string' ? r['name'] : '';
+    if (resourceType || resourceName) {
+      const label = resourceType || resourceName;
+      entities.push(makeEntity({
+        entityType: 'resource',
+        name: label,
+        fullyQualifiedName: `${namespace}/resource/${label}`,
+        filePath,
+        lineStart: findKeyLine(text, resourceType || resourceName),
+        lineEnd: findKeyLine(text, resourceType || resourceName),
+      }));
     }
   }
+
   return entities;
 }
 
 function extractGenericEntities(
-  obj: Parser.SyntaxNode,
-  source: Buffer,
+  obj: Record<string, unknown>,
+  text: string,
   filePath: string,
   namespace: string,
 ): ParsedEntity[] {
-  const entities: ParsedEntity[] = [];
-  for (const [key, valNode] of getTopLevelPairs(obj, source)) {
-    entities.push(makeEntity({
+  return Object.keys(obj).map((key) =>
+    makeEntity({
       entityType: 'config',
       name: key,
       fullyQualifiedName: `${namespace}/${key}`,
       filePath,
-      lineStart: valNode.startPosition.row + 1,
-      lineEnd: valNode.endPosition.row + 1,
-    }));
-  }
-  return entities;
+      lineStart: findKeyLine(text, key),
+      lineEnd: findKeyLine(text, key),
+    }),
+  );
 }
 
 function buildEdges(parsed: ParsedFile): ParsedEdge[] {
@@ -190,45 +147,44 @@ function buildEdges(parsed: ParsedFile): ParsedEdge[] {
 }
 
 export class JsonParser extends BaseParser {
-  private parser: Parser;
-
-  constructor() {
-    super();
-    this.parser = getParser();
-  }
-
   parseFile(filePath: string, source: Buffer, relativePath: string): ParsedFile {
-    const tree = this.parser.parse(source.toString('utf-8'));
-    const root = tree.rootNode;
-
+    const text = source.toString('utf-8');
     const namespace = relativePath.replace(/\\/g, '/');
-    const obj = getRootObject(root);
+
+    let obj: Record<string, unknown> | null = null;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        obj = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Invalid JSON — return empty parse result
+    }
 
     let entities: ParsedEntity[] = [];
     if (obj) {
-      const keys = topLevelKeys(obj, source);
-      if (isArmTemplate(obj, source)) {
-        entities = extractArmEntities(obj, source, relativePath, namespace);
+      if (isArmTemplate(obj)) {
+        entities = extractArmEntities(obj, text, relativePath, namespace);
         if (entities.length === 0) {
-          entities = extractGenericEntities(obj, source, relativePath, namespace);
+          entities = extractGenericEntities(obj, text, relativePath, namespace);
         }
-      } else if (isGrafana(keys)) {
-        entities = extractGrafanaEntities(obj, source, relativePath, namespace);
+      } else if (isGrafana(obj)) {
+        entities = extractGrafanaEntities(obj, text, relativePath, namespace);
         if (entities.length === 0) {
-          entities = extractGenericEntities(obj, source, relativePath, namespace);
+          entities = extractGenericEntities(obj, text, relativePath, namespace);
         }
       } else {
-        entities = extractGenericEntities(obj, source, relativePath, namespace);
+        entities = extractGenericEntities(obj, text, relativePath, namespace);
       }
     }
 
-    const parsed = makeParsedFile({
+    const result = makeParsedFile({
       filePath: relativePath,
       language: 'json',
       namespace,
       entities,
     });
-    parsed.edges = buildEdges(parsed);
-    return parsed;
+    result.edges = buildEdges(result);
+    return result;
   }
 }

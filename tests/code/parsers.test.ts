@@ -2,7 +2,7 @@
  * Tests for code parsers — language-specific AST parsing.
  *
  * Tests each parser against representative source code snippets.
- * Tree-sitter is a native module — these tests verify it loads and produces correct entities.
+ * WASM tree-sitter parsers are async — tests use await for parseFile calls.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -57,7 +57,7 @@ describe('getParser', () => {
 describe('TSX parser', () => {
   const parser = getParser('tsx')!;
 
-  it('extracts component from TSX file', () => {
+  it('extracts component from TSX file', async () => {
     const source = `
 import React from 'react';
 
@@ -69,7 +69,7 @@ export function Greeting({ name }: Props): JSX.Element {
   return <div>Hello, {name}!</div>;
 }
 `;
-    const result = parser.parseFile('src/Greeting.tsx', Buffer.from(source), 'src/Greeting.tsx');
+    const result = await parser.parseFile('src/Greeting.tsx', Buffer.from(source), 'src/Greeting.tsx');
     expect(result.language).toBe('tsx');
     const func = result.entities.find(e => e.name === 'Greeting');
     expect(func).toBeDefined();
@@ -84,7 +84,7 @@ export function Greeting({ name }: Props): JSX.Element {
 describe('TypeScript parser', () => {
   const parser = getParser('typescript')!;
 
-  it('extracts class declarations', () => {
+  it('extracts class declarations', async () => {
     const source = `
 export class MyService {
   private name: string;
@@ -98,7 +98,7 @@ export class MyService {
   }
 }
 `;
-    const result = parser.parseFile('src/service.ts', Buffer.from(source), 'src/service.ts');
+    const result = await parser.parseFile('src/service.ts', Buffer.from(source), 'src/service.ts');
     expect(result.language).toBe('typescript');
     expect(result.filePath).toBe('src/service.ts');
 
@@ -111,7 +111,7 @@ export class MyService {
     expect(methods.some(m => m.name === 'greet')).toBe(true);
   });
 
-  it('extracts interface declarations', () => {
+  it('extracts interface declarations', async () => {
     const source = `
 export interface Config {
   host: string;
@@ -119,25 +119,25 @@ export interface Config {
   debug?: boolean;
 }
 `;
-    const result = parser.parseFile('src/config.ts', Buffer.from(source), 'src/config.ts');
+    const result = await parser.parseFile('src/config.ts', Buffer.from(source), 'src/config.ts');
     const iface = result.entities.find(e => e.name === 'Config');
     expect(iface).toBeDefined();
     expect(iface!.entityType).toBe('interface');
   });
 
-  it('extracts standalone functions', () => {
+  it('extracts standalone functions', async () => {
     const source = `
 export function calculateTotal(items: number[]): number {
   return items.reduce((sum, item) => sum + item, 0);
 }
 `;
-    const result = parser.parseFile('src/utils.ts', Buffer.from(source), 'src/utils.ts');
+    const result = await parser.parseFile('src/utils.ts', Buffer.from(source), 'src/utils.ts');
     const func = result.entities.find(e => e.name === 'calculateTotal');
     expect(func).toBeDefined();
     expect(func!.entityType).toBe('function');
   });
 
-  it('extracts import statements', () => {
+  it('extracts import statements', async () => {
     const source = `
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -146,26 +146,26 @@ export function readConfig(): string {
   return readFileSync(path.join('.', 'config.json'), 'utf-8');
 }
 `;
-    const result = parser.parseFile('src/reader.ts', Buffer.from(source), 'src/reader.ts');
+    const result = await parser.parseFile('src/reader.ts', Buffer.from(source), 'src/reader.ts');
     expect(result.usingDirectives).toContain('node:fs');
     expect(result.usingDirectives).toContain('node:path');
   });
 
-  it('extracts enum declarations', () => {
+  it('extracts enum declarations', async () => {
     const source = `
 export enum Status {
   Active = 'active',
   Inactive = 'inactive',
 }
 `;
-    const result = parser.parseFile('src/types.ts', Buffer.from(source), 'src/types.ts');
+    const result = await parser.parseFile('src/types.ts', Buffer.from(source), 'src/types.ts');
     const enumEntity = result.entities.find(e => e.name === 'Status');
     expect(enumEntity).toBeDefined();
     expect(enumEntity!.entityType).toBe('enum');
   });
 
-  it('handles empty file', () => {
-    const result = parser.parseFile('empty.ts', Buffer.from(''), 'empty.ts');
+  it('handles empty file', async () => {
+    const result = await parser.parseFile('empty.ts', Buffer.from(''), 'empty.ts');
     expect(result.entities).toHaveLength(0);
   });
 });
@@ -177,7 +177,7 @@ export enum Status {
 describe('Python parser', () => {
   const parser = getParser('python')!;
 
-  it('extracts class declarations', () => {
+  it('extracts class declarations', async () => {
     const source = `
 class Animal:
     def __init__(self, name: str):
@@ -186,7 +186,7 @@ class Animal:
     def speak(self) -> str:
         return f"{self.name} says hello"
 `;
-    const result = parser.parseFile('animal.py', Buffer.from(source), 'animal.py');
+    const result = await parser.parseFile('animal.py', Buffer.from(source), 'animal.py');
     const cls = result.entities.find(e => e.name === 'Animal');
     expect(cls).toBeDefined();
     expect(cls!.entityType).toBe('class');
@@ -194,12 +194,12 @@ class Animal:
     expect(cls!.members.some(m => m.name === 'speak')).toBe(true);
   });
 
-  it('extracts standalone functions', () => {
+  it('extracts standalone functions', async () => {
     const source = `
 def greet(name: str) -> str:
     return f"Hello, {name}!"
 `;
-    const result = parser.parseFile('utils.py', Buffer.from(source), 'utils.py');
+    const result = await parser.parseFile('utils.py', Buffer.from(source), 'utils.py');
     const func = result.entities.find(e => e.name === 'greet');
     expect(func).toBeDefined();
     expect(func!.entityType).toBe('function');
@@ -213,7 +213,7 @@ def greet(name: str) -> str:
 describe('Go parser', () => {
   const parser = getParser('go')!;
 
-  it('extracts struct declarations', () => {
+  it('extracts struct declarations', async () => {
     const source = `
 package main
 
@@ -226,13 +226,13 @@ func (s *Server) Start() error {
     return nil
 }
 `;
-    const result = parser.parseFile('main.go', Buffer.from(source), 'main.go');
+    const result = await parser.parseFile('main.go', Buffer.from(source), 'main.go');
     const structEntity = result.entities.find(e => e.name === 'Server');
     expect(structEntity).toBeDefined();
     expect(structEntity!.entityType).toBe('struct');
   });
 
-  it('extracts standalone functions', () => {
+  it('extracts standalone functions', async () => {
     const source = `
 package main
 
@@ -240,7 +240,7 @@ func main() {
     println("hello")
 }
 `;
-    const result = parser.parseFile('main.go', Buffer.from(source), 'main.go');
+    const result = await parser.parseFile('main.go', Buffer.from(source), 'main.go');
     const func = result.entities.find(e => e.name === 'main');
     expect(func).toBeDefined();
     expect(func!.entityType).toBe('function');
@@ -254,13 +254,13 @@ func main() {
 describe('JSON parser', () => {
   const parser = getParser('json')!;
 
-  it('extracts top-level keys from object', () => {
+  it('extracts top-level keys from object', async () => {
     const source = JSON.stringify({
       name: "myelin",
       version: "1.0.0",
       scripts: { build: "tsc", test: "vitest" },
     }, null, 2);
-    const result = parser.parseFile('package.json', Buffer.from(source), 'package.json');
+    const result = await parser.parseFile('package.json', Buffer.from(source), 'package.json');
     expect(result.entities.length).toBeGreaterThan(0);
   });
 });
@@ -272,7 +272,7 @@ describe('JSON parser', () => {
 describe('Dockerfile parser', () => {
   const parser = getParser('dockerfile')!;
 
-  it('extracts FROM base images', () => {
+  it('extracts FROM base images', async () => {
     const source = `
 FROM node:20-alpine AS builder
 WORKDIR /app
@@ -285,7 +285,7 @@ FROM node:20-alpine
 COPY --from=builder /app/dist ./dist
 CMD ["node", "dist/index.js"]
 `;
-    const result = parser.parseFile('Dockerfile', Buffer.from(source), 'Dockerfile');
+    const result = await parser.parseFile('Dockerfile', Buffer.from(source), 'Dockerfile');
     expect(result.entities.length).toBeGreaterThan(0);
     // Should find base image entities
     const fromEntities = result.entities.filter(e =>
@@ -302,7 +302,7 @@ CMD ["node", "dist/index.js"]
 describe('YAML parser', () => {
   const parser = getParser('yaml')!;
 
-  it('extracts top-level keys', () => {
+  it('extracts top-level keys', async () => {
     const source = `
 name: CI
 on:
@@ -312,7 +312,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
 `;
-    const result = parser.parseFile('.github/workflows/ci.yml', Buffer.from(source), '.github/workflows/ci.yml');
+    const result = await parser.parseFile('.github/workflows/ci.yml', Buffer.from(source), '.github/workflows/ci.yml');
     expect(result.entities.length).toBeGreaterThan(0);
   });
 });

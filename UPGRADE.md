@@ -62,6 +62,25 @@ myelin doctor       # check everything is healthy
 
 ## Version History
 
+### v0.11.0 — WASM Tree-Sitter Migration
+
+**Upgrade action:** `myelin update` — restart Copilot CLI after upgrade.
+
+**What changed:**
+
+- **Tree-sitter migrated from native bindings to WASM** (#75) — All tree-sitter language grammars now use `web-tree-sitter` (WASM) instead of native C++ bindings. This eliminates C++ compilation during install for code parsing. Native packages removed: `tree-sitter`, `tree-sitter-typescript`, `tree-sitter-python`, `tree-sitter-go`, `tree-sitter-c-sharp`, `tree-sitter-json`, `tree-sitter-bicep`, `tree-sitter-powershell`.
+- **New dependencies**: `web-tree-sitter` (WASM runtime) and `@vscode/tree-sitter-wasm` (pre-built grammar WASM files from VS Code).
+- **JSON parser converted to native JSON.parse()** — No longer uses tree-sitter for JSON parsing. Uses `JSON.parse()` + object key extraction instead.
+- **Postinstall script removed** — `scripts/postinstall.mjs` (which patched tree-sitter's binding.gyp for C++20) is no longer needed.
+- **parseFile is now async** — Parsers using WASM load grammars asynchronously on first call. Cached for reuse after initialization.
+- **C++ toolchain only needed for SQLite** — better-sqlite3 and sqlite-vec still require C++ compilation. Tree-sitter no longer does.
+
+**Breaking changes:**
+- `parseFile()` on tree-sitter-based parsers (TypeScript, Python, Go, C#) now returns `Promise<ParsedFile>` instead of `ParsedFile`. Callers must use `await`.
+- Tree-sitter native packages are no longer installed. If you have scripts that reference them, update accordingly.
+
+---
+
 ### v0.10.6 — Hook Migration to Session Events
 
 **Upgrade action:** `myelin update` — restart Copilot CLI after upgrade.
@@ -318,4 +337,4 @@ myelin sleep
 ```
 
 ### Node.js version
-Myelin requires Node.js 24 (25+ is not yet supported). Native addons (better-sqlite3, tree-sitter) recompile during install for your Node version. If you upgrade Node, re-run `myelin setup-extension` to recompile.
+Myelin requires Node.js 24 (25+ is not yet supported). Native addons (better-sqlite3, sqlite-vec) recompile during install for your Node version. Code parsing uses web-tree-sitter (WASM) and requires no recompilation. If you upgrade Node, re-run `myelin setup-extension` to recompile native SQLite modules.

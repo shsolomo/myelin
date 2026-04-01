@@ -1,34 +1,30 @@
 /**
- * Python parser using tree-sitter.
+ * Python parser using web-tree-sitter (WASM).
  * Ported from cortex/code/parsers/python_parser.py
  */
 
-import Parser from 'tree-sitter';
-import Python from 'tree-sitter-python';
 import type { ParsedEdge, ParsedEntity, ParsedFile } from '../models.js';
 import { makeEntity, makeEdge, makeParsedFile } from '../models.js';
 import { BaseParser } from './base.js';
+import { createParser } from './wasm-init.js';
+import type { Parser, SyntaxNode } from './wasm-init.js';
 
-function getParser(): Parser {
-  const parser = new Parser();
-  parser.setLanguage(Python as unknown as Parser.Language);
-  return parser;
-}
+let cachedParser: Parser | null = null;
 
-function nodeText(node: Parser.SyntaxNode, source: Buffer): string {
+function nodeText(node: SyntaxNode, source: Buffer): string {
   return source.subarray(node.startIndex, node.endIndex).toString('utf-8');
 }
 
-function findChild(node: Parser.SyntaxNode, typeName: string): Parser.SyntaxNode | null {
-  return node.children.find((c) => c.type === typeName) ?? null;
+function findChild(node: SyntaxNode, typeName: string): SyntaxNode | null {
+  return node.children.find((c: SyntaxNode) => c.type === typeName) ?? null;
 }
 
-function getName(node: Parser.SyntaxNode, source: Buffer): string {
+function getName(node: SyntaxNode, source: Buffer): string {
   const nameNode = findChild(node, 'identifier');
   return nameNode ? nodeText(nameNode, source) : '';
 }
 
-function extractImports(root: Parser.SyntaxNode, source: Buffer): string[] {
+function extractImports(root: SyntaxNode, source: Buffer): string[] {
   const imports: string[] = [];
   for (const child of root.children) {
     if (child.type === 'import_statement') {
@@ -55,7 +51,7 @@ function deriveNamespace(relativePath: string): string {
   return norm.replace(/\//g, '.');
 }
 
-function getBaseClasses(node: Parser.SyntaxNode, source: Buffer): string[] {
+function getBaseClasses(node: SyntaxNode, source: Buffer): string[] {
   const argList = findChild(node, 'argument_list');
   if (!argList) return [];
   const bases: string[] = [];
@@ -67,7 +63,7 @@ function getBaseClasses(node: Parser.SyntaxNode, source: Buffer): string[] {
   return bases;
 }
 
-function getDecorators(node: Parser.SyntaxNode, source: Buffer): string[] {
+function getDecorators(node: SyntaxNode, source: Buffer): string[] {
   const decorators: string[] = [];
   for (const c of node.children) {
     if (c.type === 'decorator') {
@@ -79,7 +75,7 @@ function getDecorators(node: Parser.SyntaxNode, source: Buffer): string[] {
 }
 
 function extractEntities(
-  root: Parser.SyntaxNode,
+  root: SyntaxNode,
   source: Buffer,
   namespace: string,
   filePath: string,
@@ -229,15 +225,16 @@ function buildEdges(parsed: ParsedFile): ParsedEdge[] {
 }
 
 export class PythonParser extends BaseParser {
-  private parser: Parser;
-
   constructor() {
     super();
-    this.parser = getParser();
   }
 
-  parseFile(filePath: string, source: Buffer, relativePath: string): ParsedFile {
-    const tree = this.parser.parse(source.toString('utf-8'));
+  async parseFile(filePath: string, source: Buffer, relativePath: string): Promise<ParsedFile> {
+    if (!cachedParser) {
+      cachedParser = await createParser('tree-sitter-python.wasm');
+    }
+
+    const tree = cachedParser.parse(source.toString('utf-8'));
     const root = tree.rootNode;
 
     const namespace = deriveNamespace(relativePath);

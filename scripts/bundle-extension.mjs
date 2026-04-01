@@ -17,10 +17,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf-8"));
 
-// Native addons that need require() (CJS with binary bindings)
+// Native addons and CJS modules that need require() at runtime
 const requirePackages = [
   "better-sqlite3",
   "sqlite-vec",
+  "web-tree-sitter",
 ];
 
 // Copilot SDK — must use ESM import (not require) to match how the CLI

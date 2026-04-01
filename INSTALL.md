@@ -2,7 +2,7 @@
 
 Myelin gives your Copilot CLI agents persistent, searchable memory across sessions. Install it once, and every agent automatically gets graph-backed tools, context injection, and session logging — no configuration required.
 
-**What you need:** Node.js 24 and `gh` CLI authenticated. That's it for the package install. The npm path also requires a C++ toolchain for native modules. Node.js 25+ is not yet supported.
+**What you need:** Node.js 24 and `gh` CLI authenticated. That's it for the package install. The npm path also requires a C++ toolchain for native SQLite modules (better-sqlite3). Node.js 25+ is not yet supported.
 
 ---
 
@@ -103,9 +103,9 @@ This method installs myelin globally and sets up the extension at user level (`~
 npm install -g github:shsolomo/myelin
 ```
 
-Requires Node.js 24 (25+ is not yet supported). Native addons (better-sqlite3, sqlite-vec) compile during install — a C++ toolchain is required (Visual Studio Build Tools on Windows, Xcode on macOS, `build-essential` on Linux).
+Requires Node.js 24 (25+ is not yet supported). Native addons (better-sqlite3, sqlite-vec) compile during install — a C++ toolchain is required (Visual Studio Build Tools on Windows, Xcode on macOS, `build-essential` on Linux). Code parsing uses web-tree-sitter (WASM) — no C++ compilation needed for tree-sitter.
 
-> **Tip:** Add `--legacy-peer-deps` if you see peer dependency conflicts with tree-sitter-bicep.
+> **Tip:** Add `--legacy-peer-deps` if you see peer dependency conflicts.
 
 ### 2. Set up the extension
 
@@ -173,7 +173,7 @@ myelin parse ./path/to/your-repo --namespace repo:my-project
 
 The `--namespace` flag partitions your graph by source. Use a consistent naming convention like `repo:name` for code and `docs:name` for documents.
 
-Extracts classes, methods, interfaces, functions, and their relationships using tree-sitter. Supports C#, TypeScript, JavaScript, Python, Go, JSON, YAML, Dockerfile, PowerShell, and Bicep.
+Extracts classes, methods, interfaces, functions, and their relationships using web-tree-sitter (WASM). Supports C#, TypeScript, JavaScript, Python, Go, JSON, YAML, Dockerfile, PowerShell, and Bicep. No C++ compilation needed for code parsing.
 
 ### 5. Verify everything works
 
@@ -375,7 +375,7 @@ npm error   peerOptional tree-sitter@"^0.22.1" from tree-sitter-bicep@1.1.0
 **Workaround**: The project includes `.npmrc` with `legacy-peer-deps=true`. If installing manually, add `--legacy-peer-deps`.
 
 #### Native build failures
-Native addons (better-sqlite3, tree-sitter) require a C++ toolchain. If compilation fails:
+Native addons (better-sqlite3, sqlite-vec) require a C++ toolchain. If compilation fails:
 - **Windows**: Install Visual Studio Build Tools (Desktop C++ workload)
 - **macOS**: `xcode-select --install`
 - **Linux**: `sudo apt install build-essential`
@@ -393,23 +393,6 @@ npm link
 ```
 
 </details>
-
-### Tree-sitter native build warnings
-
-Tree-sitter grammars require C++ compilation. If some grammars fail to build, code parsing still works for most languages — only the specific grammar that failed will be unavailable. This is not a blocking issue.
-
-**C++ build tools required:**
-- Windows: Visual Studio Build Tools (Desktop C++ workload)
-- macOS: Xcode Command Line Tools (`xcode-select --install`)
-- Linux: `build-essential` package
-
-### Node.js 24: tree-sitter C++20 build failure
-
-Node.js 24's V8 headers require C++20, but tree-sitter@0.25.0 forces C++17. Myelin includes a postinstall script that patches this automatically. If you still see `C++20 or later required` errors:
-
-```bash
-npm rebuild
-```
 
 ### Node.js 24 + Visual Studio 2026: node-gyp not recognized
 

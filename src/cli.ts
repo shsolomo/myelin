@@ -1290,7 +1290,7 @@ program
       try {
         const absFilePath = join(absRepoPath, filePath);
         const source = readFileSync(absFilePath);
-        const parsed = parser.parseFile(absFilePath, source, filePath);
+        const parsed = await parser.parseFile(absFilePath, source, filePath);
         if (parsed.entities.length > 0) {
           parsedFiles.push(parsed);
         }

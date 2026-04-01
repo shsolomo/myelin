@@ -1,44 +1,40 @@
 /**
- * C# parser using tree-sitter.
+ * C# parser using web-tree-sitter (WASM).
  * Ported from cortex/code/parsers/csharp.py
  */
 
-import Parser from 'tree-sitter';
-import CSharp from 'tree-sitter-c-sharp';
 import type { ParsedEdge, ParsedEntity, ParsedFile } from '../models.js';
 import { makeEntity, makeEdge, makeParsedFile } from '../models.js';
 import { BaseParser } from './base.js';
+import { createParser } from './wasm-init.js';
+import type { Parser, SyntaxNode } from './wasm-init.js';
 
-function getParser(): Parser {
-  const parser = new Parser();
-  parser.setLanguage(CSharp as unknown as Parser.Language);
-  return parser;
-}
+let cachedParser: Parser | null = null;
 
-function nodeText(node: Parser.SyntaxNode, source: Buffer): string {
+function nodeText(node: SyntaxNode, source: Buffer): string {
   return source.subarray(node.startIndex, node.endIndex).toString('utf-8');
 }
 
-function findChildren(node: Parser.SyntaxNode, typeName: string): Parser.SyntaxNode[] {
-  return node.children.filter((c) => c.type === typeName);
+function findChildren(node: SyntaxNode, typeName: string): SyntaxNode[] {
+  return node.children.filter((c: SyntaxNode) => c.type === typeName);
 }
 
-function findChild(node: Parser.SyntaxNode, typeName: string): Parser.SyntaxNode | null {
-  return node.children.find((c) => c.type === typeName) ?? null;
+function findChild(node: SyntaxNode, typeName: string): SyntaxNode | null {
+  return node.children.find((c: SyntaxNode) => c.type === typeName) ?? null;
 }
 
-function getName(node: Parser.SyntaxNode, source: Buffer): string {
+function getName(node: SyntaxNode, source: Buffer): string {
   const nameNode = findChild(node, 'identifier') ?? findChild(node, 'name');
   return nameNode ? nodeText(nameNode, source) : '';
 }
 
-function getModifiers(node: Parser.SyntaxNode, source: Buffer): string[] {
+function getModifiers(node: SyntaxNode, source: Buffer): string[] {
   return node.children
-    .filter((c) => c.type === 'modifier')
-    .map((c) => nodeText(c, source));
+    .filter((c: SyntaxNode) => c.type === 'modifier')
+    .map((c: SyntaxNode) => nodeText(c, source));
 }
 
-function getBaseTypes(node: Parser.SyntaxNode, source: Buffer): string[] {
+function getBaseTypes(node: SyntaxNode, source: Buffer): string[] {
   const baseList = findChild(node, 'base_list');
   if (!baseList) return [];
   const types: string[] = [];
@@ -57,7 +53,7 @@ function getBaseTypes(node: Parser.SyntaxNode, source: Buffer): string[] {
   return types;
 }
 
-function extractNamespace(root: Parser.SyntaxNode, source: Buffer): string {
+function extractNamespace(root: SyntaxNode, source: Buffer): string {
   for (const child of root.children) {
     if (child.type === 'file_scoped_namespace_declaration' || child.type === 'namespace_declaration') {
       const nameNode = findChild(child, 'qualified_name') ?? findChild(child, 'identifier');
@@ -67,7 +63,7 @@ function extractNamespace(root: Parser.SyntaxNode, source: Buffer): string {
   return '';
 }
 
-function extractUsings(root: Parser.SyntaxNode, source: Buffer): string[] {
+function extractUsings(root: SyntaxNode, source: Buffer): string[] {
   const usings: string[] = [];
   for (const child of root.children) {
     if (child.type === 'using_directive') {
@@ -97,7 +93,7 @@ const MEMBER_DECLS: Record<string, string> = {
 };
 
 function extractTypeEntities(
-  node: Parser.SyntaxNode,
+  node: SyntaxNode,
   source: Buffer,
   namespace: string,
   filePath: string,
@@ -247,15 +243,16 @@ function buildEdges(parsed: ParsedFile): ParsedEdge[] {
 }
 
 export class CSharpParser extends BaseParser {
-  private parser: Parser;
-
   constructor() {
     super();
-    this.parser = getParser();
   }
 
-  parseFile(filePath: string, source: Buffer, relativePath: string): ParsedFile {
-    const tree = this.parser.parse(source.toString('utf-8'));
+  async parseFile(filePath: string, source: Buffer, relativePath: string): Promise<ParsedFile> {
+    if (!cachedParser) {
+      cachedParser = await createParser('tree-sitter-c-sharp.wasm');
+    }
+
+    const tree = cachedParser.parse(source.toString('utf-8'));
     const root = tree.rootNode;
 
     const namespace = extractNamespace(root, source);
