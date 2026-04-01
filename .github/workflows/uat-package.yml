@@ -1,0 +1,39 @@
+name: Package Install UAT
+
+# Runs after CI completes — the sync-genesis job in ci.yml must publish
+# the package to .github/package/myelin/ before these tests can download it.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  # ── Fresh install via genesis package ─────────────────────────────────────
+  fresh-install-package:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Simulate package install
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Create extension directory
+          EXT_DIR="$HOME/.copilot/extensions/myelin"
+          mkdir -p "$EXT_DIR"
+
+          # Download extension.mjs and package.json directly from the known path
+          gh api repos/shsolomo/myelin/contents/.github/package/myelin/extension.mjs --jq '.content' | base64 -d > "$EXT_DIR/extension.mjs"
+          gh api repos/shsolomo/myelin/contents/.github/package/myelin/package.json --jq '.content' | base64 -d > "$EXT_DIR/package.json"
+
+          # Install native deps
+          cd "$EXT_DIR" && npm install --omit=dev
+
+          # Verify extension exists
+          test -f "$EXT_DIR/extension.mjs" && echo "✅ Extension installed" || exit 1
+          test -d "$EXT_DIR/node_modules/better-sqlite3" && echo "✅ Native deps installed" || exit 1
