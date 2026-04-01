@@ -1,0 +1,11 @@
+{
+  "name": "myelin-extension",
+  "version": "1.0.0",
+  "description": "Myelin Copilot CLI extension runtime dependencies",
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "sqlite-vec": "^0.1.6",
+    "web-tree-sitter": "^0.26.8",
+    "@vscode/tree-sitter-wasm": "^0.3.0"
+  }
+}
