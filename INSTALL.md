@@ -215,6 +215,53 @@ myelin agent log myagent decision "Switch from REST to gRPC for internal service
 
 Log types: `decision`, `action`, `finding`, `error`, `observation`, `handover`
 
+### Teach your agents to log (recommended)
+
+The automatic hooks capture session summaries, but the richest memory comes from agents logging **during** work — decisions they made, bugs they found, patterns they noticed. Add a memory section to each agent's `.agent.md` definition file.
+
+Here's the template — replace `<agent-name>` with your agent's name:
+
+```markdown
+## Before Starting
+
+> Graph knowledge and recent activity logs are injected automatically
+> by the myelin extension's `onSessionStart` hook — no manual boot
+> commands needed.
+
+## Session Logging
+
+Log key events during your work using the myelin_log tool:
+
+- **decision** — choices made and why
+- **finding** — something discovered during investigation
+- **error** — what went wrong and the workaround
+- **action** — what was done (skip routine operations)
+- **observation** — patterns or insights noticed
+- **handover** — session ending, pending items and next steps
+
+Log what matters — skip routine operations. Each entry feeds into
+the knowledge graph during consolidation.
+```
+
+**What this does:**
+- The "Before Starting" note tells the agent its graph context is already loaded — no boot commands needed
+- The "Session Logging" section teaches the agent to call `myelin_log` with structured event types during work
+- These explicit logs capture the **why** behind decisions, not just the **what** — which the automatic hooks already handle
+
+**Why both layers matter:**
+| Layer | Captures | Example |
+|-------|----------|---------|
+| **Automatic hooks** | What happened (session summary, errors) | "Session completed: modified 3 files in auth module" |
+| **Explicit agent logs** | Why it matters (decisions, patterns, corrections) | "Switched to JWT because session-based auth doesn't work with the load balancer" |
+
+The automatic layer gives you coverage. The explicit layer gives you insight. Both feed into the same JSONL logs → sleep cycle → knowledge graph pipeline.
+
+**Generate instructions for a specific agent:**
+```bash
+myelin agent instructions <agent-name>
+```
+This outputs the exact text to paste into your agent definition, pre-filled with the agent's name.
+
 ### Consolidate + embed
 
 ```bash
